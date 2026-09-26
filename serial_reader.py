@@ -14,7 +14,6 @@ Protocol:
 from __future__ import annotations
 
 import glob
-import sys
 import time
 from typing import Optional
 

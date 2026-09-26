@@ -27,8 +27,8 @@ import urllib.error
 import urllib.request
 from typing import Callable, Optional
 
-# Primary and fallback Gemini models
-GEMINI_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3.8-flash"]
+# Primary and fallback Gemini models (Flash-Lite prioritized for high RPM and low latency)
+GEMINI_MODELS = ["gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3.8-flash", "gemini-flash-latest"]
 GEMINI_API_URL_TEMPLATE = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
 )

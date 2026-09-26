@@ -10,10 +10,9 @@ returns an empty list rather than taking down the safety loop.
 from __future__ import annotations
 
 import math
-import os
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from fusion import Detection
 
@@ -64,6 +63,25 @@ def _model_path(value: str | Path) -> Path:
     return (Path(__file__).resolve().parent / path).resolve()
 
 
+def _ensure_model_files(config_path: Path, weights_path: Path) -> None:
+    """Download default MobileNet-SSD Caffe files if missing."""
+    import urllib.request
+    urls = {
+        config_path: "https://raw.githubusercontent.com/chuanqi305/MobileNet-SSD/master/voc/MobileNetSSD_deploy.prototxt",
+        weights_path: "https://raw.githubusercontent.com/djmv/MobilNet_SSD_opencv/master/MobileNetSSD_deploy.caffemodel",
+    }
+    for target, url in urls.items():
+        if not target.is_file():
+            print(f"[VisionReader] Downloading missing model file {target.name}...")
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=30) as resp, open(target, "wb") as f:
+                    f.write(resp.read())
+                print(f"[VisionReader] Downloaded {target.name} successfully.")
+            except Exception as exc:
+                print(f"[VisionReader] Warning: Auto-download of {target.name} failed ({exc}).")
+
+
 class VisionReader:
     """Capture webcam frames and turn vision output into detections."""
 
@@ -89,50 +107,41 @@ class VisionReader:
                 "OpenCV is required for VisionReader; install opencv-python"
             ) from exc
 
+        config_path = _model_path(model_config)
+        weights_path = _model_path(model_weights)
+        missing = [str(path) for path in (config_path, weights_path) if not path.is_file()]
+        if missing and (str(model_config) == MODEL_CONFIG or str(model_weights) == MODEL_WEIGHTS):
+            _ensure_model_files(config_path, weights_path)
+            missing = [str(path) for path in (config_path, weights_path) if not path.is_file()]
+        if missing:
+            raise FileNotFoundError(
+                "MobileNet-SSD model file(s) not found: " + ", ".join(missing)
+            )
         self._cv2: Any = cv2
         self._confidence_floor = float(confidence_floor)
         self._max_detections = max_detections
         self._show_preview = show_preview
         self._closed = False
         self._warned_capture_failure = False
-        self._latest_frame: Optional[Any] = None
-        self._net: Optional[Any] = None
-        self._hog: Optional[Any] = None
-        self._face_cascade: Optional[Any] = None
+        self._latest_frame: Any | None = None
 
-        # 1. Try MobileNet-SSD Caffe model if files exist
-        config_path = _model_path(model_config)
-        weights_path = _model_path(model_weights)
-        if config_path.is_file() and weights_path.is_file():
-            try:
-                self._net = cv2.dnn.readNetFromCaffe(str(config_path), str(weights_path))
-                print(f"[VisionReader] camera={camera_index} model={weights_path.name} confidence>={self._confidence_floor:.2f}")
-            except Exception as exc:
-                print(f"[VisionReader] Could not load MobileNet-SSD model: {exc}")
-
-        # 2. Fallback to OpenCV Built-In HOG Person Detector if Caffe files not present
-        if self._net is None:
-            try:
-                self._hog = cv2.HOGDescriptor()
-                self._hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
-                print("[VisionReader] Loaded OpenCV Built-In HOG Person Detector fallback")
-            except Exception as exc:
-                print(f"[VisionReader] HOG detector init error: {exc}")
-
-            try:
-                cascade_path = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
-                if os.path.exists(cascade_path):
-                    self._face_cascade = cv2.CascadeClassifier(cascade_path)
-            except Exception:
-                pass
+        try:
+            self._net = cv2.dnn.readNetFromCaffe(str(config_path), str(weights_path))
+        except Exception as exc:
+            raise RuntimeError(f"Could not load MobileNet-SSD model: {exc}") from exc
 
         self._cap = cv2.VideoCapture(camera_index)
         if hasattr(self._cap, "isOpened") and not self._cap.isOpened():
             self._cap.release()
-            print(f"[VisionReader] WARNING: Could not open camera index {camera_index}")
+            raise RuntimeError(f"Could not open camera index {camera_index}")
+
+        print(
+            f"[VisionReader] camera={camera_index} model={weights_path.name} "
+            f"confidence>={self._confidence_floor:.2f}"
+        )
 
     @property
-    def latest_frame(self) -> Optional[Any]:
+    def latest_frame(self) -> Any | None:
         """Returns the most recent raw BGR camera frame."""
         return self._latest_frame
 

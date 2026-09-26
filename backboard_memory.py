@@ -192,7 +192,7 @@ class BackboardMemory:
                             await client.aclose()
                             return None
 
-                        # Ask assistant thread with Gemini 3.8 Flash
+                        # Ask assistant thread with Gemini 3.1 Flash Lite (high RPM, low latency)
                         thread = await client.create_thread(assistant_id=self.assistant_id)
                         ctx = " ".join(mems)
                         prompt = (
@@ -200,12 +200,20 @@ class BackboardMemory:
                             f"User question: {question}\n"
                             "Answer in 1 concise sentence for a blind user navigating with GuideSense."
                         )
-                        resp = await client.send_message(
-                            thread_id=thread.thread_id,
-                            content=prompt,
-                            llm_provider="google",
-                            model_name="gemini-3.8-flash",
-                        )
+                        resp = None
+                        for model_name in ["gemini-3.1-flash-lite", "gemini-3.8-flash"]:
+                            try:
+                                resp = await client.send_message(
+                                    thread_id=thread.thread_id,
+                                    content=prompt,
+                                    llm_provider="google",
+                                    model_name=model_name,
+                                )
+                                if resp and getattr(resp, "content", None):
+                                    break
+                            except Exception:
+                                continue
+
                         await client.aclose()
                         return resp.content if resp else None
 
