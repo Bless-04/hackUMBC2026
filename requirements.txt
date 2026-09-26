@@ -1,9 +1,13 @@
 # GuideSense — Python dependencies
 # Install: pip install -r requirements.txt
 
-# --- CI / testing ---
+# --- Testing & Quality Assurance ---
 pytest>=7.4
 pytest-cov>=4.1
+ruff>=0.4
+
+# --- AI Cloud & Persistent Memory ---
+backboard-sdk>=1.5.0
 
 # --- Vision pipeline (IT freshman) ---
 # opencv-python>=4.8     # uncomment when vision.py is implemented
