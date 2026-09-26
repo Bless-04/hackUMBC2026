@@ -204,6 +204,134 @@ uv run python -X utf8 main.py --camera-distance
 *Uses the Logitech webcam for both object detection and monocular distance estimation.*
 
 #### 3. Full Real Hardware Mode (Arduino Breadboard + Webcam + JBL Speaker)
+# From the CE freshman's ultrasonic serial reader:
+distance_m: float          # metres, e.g. 1.47
+
+# From the IT freshman's vision module:
+detections: list[Detection]
+
+# Detection fields:
+Detection(
+    label:      str,                    # e.g. "person", "chair"
+    confidence: float,                  # 0.0 – 1.0
+    bbox:       tuple[int,int,int,int], # (x1, y1, x2, y2) pixels
+    timestamp:  float,                  # time.monotonic()
+)
+```
+
+---
+
+## Hardware Testing & Subsystem Verification
+
+Before running full end-to-end integration, test each individual hardware subsystem independently:
+
+### 1. Camera Focal Length Calibration (`calibrate.py`)
+Calibrate your webcam to compute the exact `FOCAL_LENGTH_PX` constant for pinhole distance calculation:
+```bash
+# Calibrate using standing person at 2.0 m (default)
+python3 calibrate.py --height 170.0 --distance 200.0
+
+# Calibrate using a standard chair (85 cm) at 1.5 m (150 cm)
+python3 calibrate.py --height 85.0 --distance 150.0
+```
+* **Steps**: Press `SPACE` / `ENTER` to freeze the frame, drag a bounding box from top to bottom of the object, and press `ENTER`.
+* **Output**: Copy the calculated `FOCAL_LENGTH_PX` value into `distance.py`.
+
+---
+
+### 2. Camera-Only Distance Estimation (`distance.py` / `main.py`)
+Test bounding-box distance calculation without physical ultrasonic hardware:
+```bash
+# Run GuideSense using monocular camera distance estimation
+python3 main.py --camera-distance
+
+# Or run with live camera detection and camera distance
+python3 main.py --live --duration 20
+```
+
+---
+
+### 3. Vision Module Test (`vision.py`)
+Test camera capture and real-time object detector:
+```bash
+python3 vision.py
+```
+* **Expected Output**: Continuous stream of detections (`label`, `confidence`, `bbox`) at $\ge 10\text{ FPS}$.
+
+---
+
+### 4. Audio / TTS Subsystem Test (`audio.py`)
+Test non-blocking speech synthesis:
+```bash
+python3 audio.py
+```
+* **Expected Output**: Speaks `"person"`, `"chair"`, `"bicycle"` in order with audible pauses, without hanging the console.
+
+---
+
+### 5. Haptics / Buzzer Test (`haptics.py`)
+Test buzzer activation and cleanup:
+```bash
+python3 haptics.py
+```
+* **Expected Output**: Buzzer turns ON for 1.0 s, OFF for 1.0 s, and ON for 1.0 s before clean exit.
+
+---
+
+### 6. Ultrasonic Serial Distance Reader (`serial_reader.py`)
+Test Arduino/microcontroller USB serial distance streaming:
+```bash
+python3 serial_reader.py
+```
+* **Expected Output**: Live stream of distance readings in metres (e.g. `1.45m`, `0.52m`).
+
+---
+
+### 7. End-to-End Live Integration (`main.py`)
+
+Run the full system in your target hardware configuration:
+
+```bash
+# 1. Full Real Hardware (Serial distance + Camera Vision + Audio/Haptics)
+python3 main.py --real
+
+# 2. Camera-Only Distance Mode (No ultrasonic sensor needed)
+python3 main.py --camera-distance
+
+# 3. Partial Real Modes (for incremental testing)
+python3 main.py --real-distance   # Real ultrasonic + mock vision
+python3 main.py --real-vision     # Real camera vision + mock distance
+
+# 4. Generate Judge CSV Log Evidence
+python3 main.py --real --log
+```
+
+---
+
+## Swapping in Real Hardware
+
+Everything is modular and swappable in **`main.py`**:
+
+---
+
+## Tunable Parameters
+
+All thresholds live at the top of `fusion.py` and `state_machine.py` — no hunting through logic:
+
+| Parameter | Default | File | Effect |
+|---|---|---|---|
+| `NEAR_THRESHOLD_M` | `0.60 m` | `fusion.py` | URGENT trigger distance |
+| `MID_THRESHOLD_M` | `2.00 m` | `fusion.py` | Max range for announcements |
+| `CONFIDENCE_MIN` | `0.50` | `fusion.py` | Minimum detection confidence |
+| `PERSISTENCE_TICKS` | `3` | `fusion.py` | Frames needed to confirm object |
+| `COOLDOWN_SEC` | `12.0 s` | `fusion.py` | Re-announcement lockout |
+| `URGENT_HYSTERESIS_SEC` | `1.5 s` | `state_machine.py` | Buzzer exit delay |
+| `TICK_HZ` | `10` | `main.py` | Sensor poll rate |
+
+---
+
+## Test Coverage
+
 ```bash
 uv run python -X utf8 main.py --real
 ```
