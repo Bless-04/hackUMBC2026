@@ -4,18 +4,13 @@ version = "0.1.0"
 description = "Chest-worn navigation aid decision core for low-vision users"
 requires-python = ">=3.10"
 
-# Runtime dependencies — empty until teammates uncomment their sections.
-# Hardware packages are listed but commented out so CI stays clean.
+# Runtime dependencies. Raspberry Pi GPIO remains optional because its package
+# cannot be installed on ordinary CI and development machines.
 dependencies = [
     "backboard-sdk>=1.5.0",
-    # --- Vision pipeline (IT freshman — uncomment when vision.py is implemented) ---
-    # "opencv-python>=4.8",
-
-    # --- Audio output (IT freshman — uncomment when audio.py is implemented) ---
-    # "pyttsx3>=2.90",
-
-    # --- Serial comms (CE + IT freshman — uncomment when serial_reader/haptics ready) ---
-    # "pyserial>=3.5",
+    "opencv-python>=4.8",
+    "pyserial>=3.5",
+    "pyttsx3>=2.90",
 ]
 
 [project.optional-dependencies]

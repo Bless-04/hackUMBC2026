@@ -1,136 +1,222 @@
-"""
-haptics.py — IT Freshman's Module
-====================================
-Buzzer/vibration control for URGENT alerts.
-
-OWNED BY: Freshman #2 (Information Technology)
-CALLED BY: Senior (CS) via state_machine.HardwareInterface.buzzer_on/off()
-
-IMPORTANT — coordination with CE freshman:
-  The Arduino controls the buzzer electrically, but the Pi tells it when
-  to fire by sending a serial command OR by toggling a GPIO pin.
-  Decide with CE freshman which method you're using and match the Arduino sketch.
-
-  Option A (recommended — simpler): Pi sends "BUZZ_ON\n" / "BUZZ_OFF\n"
-    over the SAME serial connection as distance readings.
-    CE freshman adds a listener in the Arduino sketch.
-
-  Option B: Pi toggles a dedicated GPIO pin → opto-isolator → buzzer circuit.
-    Requires an extra wire but keeps audio and sensor serial separate.
-
-Contract:
-  haptics.HapticOutput().buzzer_on()  -> None
-  haptics.HapticOutput().buzzer_off() -> None
-  Both must return immediately (the state machine calls them from the main loop).
-
-How to test standalone:
-  python -X utf8 haptics.py
-  -> buzzes for 1 s, off for 1 s, buzzes for 1 s
-"""
+"""Urgent alert output using a speaker tone, Arduino serial, or Pi GPIO."""
 
 from __future__ import annotations
 
-import time
+import io
+import math
+import platform
+import shutil
+import struct
+import subprocess
+import threading
+import wave
+from typing import Any
 
-# ---------------------------------------------------------------------------
-# Configuration — choose output mode
-# ---------------------------------------------------------------------------
+OUTPUT_MODE = "SPEAKER"
+BUZZER_SERIAL_PORT = "/dev/ttyUSB0"
+BUZZER_BAUD_RATE = 9600
+BUZZER_GPIO_PIN = 18
+TONE_HZ = 880
+TONE_DURATION_SEC = 0.20
+TONE_GAP_SEC = 0.08
 
-OUTPUT_MODE = "SPEAKER"        # "SPEAKER" (JBL audio tone), "SERIAL" (Arduino), or "GPIO"
-BUZZER_SERIAL_PORT = "/dev/ttyUSB0"   # for "SERIAL"
-BUZZER_GPIO_PIN    = 18               # for "GPIO"
+_VALID_MODES = {"SPEAKER", "SERIAL", "GPIO"}
 
 
-# ---------------------------------------------------------------------------
-# Real implementation — IT freshman fills this in
-# ---------------------------------------------------------------------------
+def _tone_wav(frequency: int, duration: float, sample_rate: int = 22050) -> bytes:
+    """Create a short 16-bit mono WAV tone without third-party packages."""
+    sample_count = int(sample_rate * duration)
+    frames = bytearray()
+    amplitude = 12_000
+    for index in range(sample_count):
+        sample = int(amplitude * math.sin(2.0 * math.pi * frequency * index / sample_rate))
+        frames.extend(struct.pack("<h", sample))
+
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(sample_rate)
+        output.writeframes(frames)
+    return buffer.getvalue()
+
 
 class HapticOutput:
-    """
-    Controls urgent alerting via JBL speaker audio tone, Arduino serial, or Pi GPIO.
-    buzzer_on()  — start continuous/pulsing urgent alert
-    buzzer_off() — stop alert
-    Both are idempotent.
-    """
+    """Control an idempotent urgent alert through one selected backend."""
 
-    def __init__(self, mode: str = OUTPUT_MODE) -> None:
-        self._mode = mode
+    def __init__(
+        self,
+        mode: str = OUTPUT_MODE,
+        *,
+        serial_port: str = BUZZER_SERIAL_PORT,
+        baud: int = BUZZER_BAUD_RATE,
+        gpio_pin: int = BUZZER_GPIO_PIN,
+        serial_connection: Any | None = None,
+        gpio_module: Any | None = None,
+    ) -> None:
+        normalized_mode = mode.upper()
+        if normalized_mode not in _VALID_MODES:
+            raise ValueError(f"mode must be one of {sorted(_VALID_MODES)}")
+
+        self._mode = normalized_mode
         self._active = False
-        self._thread = None
-        self._stop_event = None
+        self._closed = False
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._stop_event: threading.Event | None = None
+        self._serial: Any | None = None
+        self._owns_serial = False
+        self._gpio: Any | None = None
+        self._gpio_pin = gpio_pin
+        self._tone = b""
+        self._audio_player: str | None = None
 
         if self._mode == "SPEAKER":
-            import threading
-            self._stop_event = threading.Event()
-            print("[HapticOutput] JBL Speaker alarm tone mode active")
+            if platform.system() != "Windows":
+                self._audio_player = shutil.which("aplay")
+                self._tone = _tone_wav(TONE_HZ, TONE_DURATION_SEC)
+                if self._audio_player is None:
+                    print("[HapticOutput] aplay not found; using terminal bell fallback")
+            print("[HapticOutput] speaker urgency tone active")
+        elif self._mode == "SERIAL":
+            if serial_connection is not None:
+                self._serial = serial_connection
+            else:
+                try:
+                    import serial
+                except ImportError as exc:  # pragma: no cover - host dependent
+                    raise RuntimeError(
+                        "pyserial is required for SERIAL haptics mode"
+                    ) from exc
+                self._serial = serial.Serial(serial_port, baud, timeout=0.1)
+                self._owns_serial = True
+            print(f"[HapticOutput] serial alert active on {serial_port}")
         else:
-            print(f"[HapticOutput] stub — mode={self._mode} not connected")
+            if gpio_module is None:
+                try:
+                    import RPi.GPIO as gpio
+                except ImportError as exc:  # pragma: no cover - Pi dependent
+                    raise RuntimeError("RPi.GPIO is required for GPIO haptics mode") from exc
+                gpio_module = gpio
+            self._gpio = gpio_module
+            self._gpio.setmode(self._gpio.BCM)
+            self._gpio.setup(self._gpio_pin, self._gpio.OUT, initial=self._gpio.LOW)
+            print(f"[HapticOutput] GPIO alert active on BCM pin {self._gpio_pin}")
 
-    def _speaker_alarm_loop(self) -> None:
-        """Looping urgency alarm tone played through system audio / laptop speakers."""
-        import os
-        import platform
-        import subprocess
+    @property
+    def is_active(self) -> bool:
+        return self._active
 
-        system = platform.system()
-
-        while not self._stop_event.is_set():
-            if system == "Darwin":  # macOS
-                # Play crisp macOS system alert pulse
-                sound_file = "/System/Library/Sounds/Ping.aiff"
-                if os.path.exists(sound_file):
-                    subprocess.run(["afplay", sound_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                else:
-                    print("\a", end="", flush=True)
-                    time.sleep(0.15)
-            elif system == "Windows":
+    def _speaker_alarm_loop(self, stop_event: threading.Event) -> None:
+        while not stop_event.is_set():
+            if platform.system() == "Windows":
                 try:
                     import winsound
-                    winsound.Beep(1000, 150)
-                except Exception:
-                    time.sleep(0.15)
-            else:  # Linux / Raspberry Pi
+
+                    winsound.Beep(TONE_HZ, int(TONE_DURATION_SEC * 1000))
+                except (ImportError, RuntimeError):
+                    stop_event.wait(TONE_DURATION_SEC)
+            elif self._audio_player is not None:
+                try:
+                    subprocess.run(
+                        [self._audio_player, "-q"],
+                        input=self._tone,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=TONE_DURATION_SEC + 1.0,
+                        check=False,
+                    )
+                except (OSError, subprocess.SubprocessError):
+                    stop_event.wait(TONE_DURATION_SEC)
+            else:
                 print("\a", end="", flush=True)
-                os.system("(speaker-test -t sine -f 880 -l 1 > /dev/null 2>&1) &")
-                time.sleep(0.2)
-            time.sleep(0.08)
+                stop_event.wait(TONE_DURATION_SEC)
+
+            stop_event.wait(TONE_GAP_SEC)
 
     def buzzer_on(self) -> None:
-        if not self._active:
-            self._active = True
-            print("[HapticOutput] *** URGENT ALARM ON ***")
+        """Start the urgent alert, returning immediately and doing nothing if active."""
+        with self._lock:
+            if self._closed:
+                return
+            if self._active:
+                return
+
             if self._mode == "SPEAKER":
-                import threading
-                self._stop_event.clear()
-                self._thread = threading.Thread(target=self._speaker_alarm_loop, daemon=True)
+                # A fresh event avoids an old worker being revived by a rapid
+                # off/on transition.
+                self._stop_event = threading.Event()
+                self._thread = threading.Thread(
+                    target=self._speaker_alarm_loop,
+                    args=(self._stop_event,),
+                    name="guidesense-urgent-tone",
+                    daemon=True,
+                )
                 self._thread.start()
+            elif self._mode == "SERIAL":
+                self._serial.write(b"BUZZ_ON\n")
+            else:
+                self._gpio.output(self._gpio_pin, self._gpio.HIGH)
+            self._active = True
+
+        print("[HapticOutput] *** URGENT ALARM ON ***")
 
     def buzzer_off(self) -> None:
-        if self._active:
-            self._active = False
-            print("[HapticOutput] --- URGENT ALARM OFF ---")
-            if self._mode == "SPEAKER" and self._stop_event:
+        """Stop the urgent alert, returning immediately and doing nothing if inactive."""
+        with self._lock:
+            if not self._active:
+                return
+
+            if self._mode == "SPEAKER" and self._stop_event is not None:
                 self._stop_event.set()
+            elif self._mode == "SERIAL":
+                self._serial.write(b"BUZZ_OFF\n")
+            elif self._mode == "GPIO":
+                self._gpio.output(self._gpio_pin, self._gpio.LOW)
+            self._active = False
+
+        print("[HapticOutput] --- URGENT ALARM OFF ---")
 
     def cleanup(self) -> None:
-        """Release audio/GPIO/serial on shutdown."""
+        """Stop output and release resources. Safe to call repeatedly."""
+        with self._lock:
+            if self._closed:
+                return
         self.buzzer_off()
 
+        with self._lock:
+            self._closed = True
+            thread = self._thread
 
-# ---------------------------------------------------------------------------
-# Standalone test
-# ---------------------------------------------------------------------------
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=TONE_DURATION_SEC + TONE_GAP_SEC + 0.25)
+
+        if self._mode == "SERIAL" and self._owns_serial and self._serial is not None:
+            self._serial.close()
+        elif self._mode == "GPIO" and self._gpio is not None:
+            self._gpio.cleanup(self._gpio_pin)
+
+    def __enter__(self) -> "HapticOutput":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.cleanup()
+
 
 if __name__ == "__main__":
-    h = HapticOutput()
-    print("Buzzer ON for 1 s...")
-    h.buzzer_on()
-    time.sleep(1.0)
-    print("Buzzer OFF for 1 s...")
-    h.buzzer_off()
-    time.sleep(1.0)
-    print("Buzzer ON for 1 s...")
-    h.buzzer_on()
-    time.sleep(1.0)
-    h.cleanup()
+    import time
+
+    output = HapticOutput()
+    try:
+        print("Alarm ON for 1 second...")
+        output.buzzer_on()
+        time.sleep(1.0)
+        print("Alarm OFF for 1 second...")
+        output.buzzer_off()
+        time.sleep(1.0)
+        print("Alarm ON for 1 second...")
+        output.buzzer_on()
+        time.sleep(1.0)
+    finally:
+        output.cleanup()
     print("Done.")
