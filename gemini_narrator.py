@@ -127,7 +127,7 @@ class GeminiNarrator:
         payload = json.dumps({
             "contents": [{"parts": parts}],
             "generationConfig": {
-                "maxOutputTokens": 60,
+                "maxOutputTokens": 300,
                 "temperature": 0.3,
             }
         }).encode("utf-8")
@@ -141,12 +141,20 @@ class GeminiNarrator:
                 method="POST",
             )
             try:
-                with urllib.request.urlopen(req, timeout=4.0) as resp:
+                with urllib.request.urlopen(req, timeout=6.0) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
-                    text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                    # Clean up any potential markdown quotes
-                    text = text.replace('"', "").replace("\n", " ")
-                    return text
+                    candidates = data.get("candidates", [])
+                    if not candidates:
+                        continue
+                    candidate = candidates[0]
+                    content = candidate.get("content", {})
+                    resp_parts = content.get("parts", [])
+                    for p in resp_parts:
+                        if "text" in p and p["text"].strip():
+                            text = p["text"].strip()
+                            # Clean up formatting
+                            text = text.replace('"', "").replace("\n", " ")
+                            return text
             except urllib.error.HTTPError as e:
                 err_msg = e.read().decode("utf-8", errors="ignore")
                 print(f"[GeminiNarrator] {model} HTTP {e.code}: {err_msg[:120]}")
