@@ -204,6 +204,132 @@ python -X utf8 haptics.py
 ```
 *Expected Output:* Emits urgency tone for 1 second, pauses for 1 second, and repeats.
 
+#### Raspberry Pi Camera + AI Hardware Test (No Arduino Required)
+
+This test uses only the **Raspberry Pi**, **Logitech USB camera**, and **JBL speaker**. The Arduino, breadboards, and jumper wires are not required because object distance is estimated from the camera bounding boxes.
+
+The active test pipeline is:
+
+```text
+Logitech camera -> MobileNet-SSD -> camera distance estimate -> fusion/state logic
+                -> Gemini guidance -> ElevenLabs/JBL audio -> Backboard memory
+```
+
+##### 1. Prepare the Raspberry Pi
+
+Connect the Logitech camera, pair or cable the JBL speaker, activate the Python virtual environment, and install the dependencies:
+
+```bash
+source .venv/bin/activate
+pip install -r requirements.txt
+sudo apt update
+sudo apt install -y alsa-utils espeak
+```
+
+Confirm that Linux can see the camera and an audio output device:
+
+```bash
+ls /dev/video*
+aplay -l
+```
+
+**Success:** At least one camera device such as `/dev/video0` is listed, and the JBL speaker or its active audio interface appears in the playback-device list.
+
+Place both MobileNet-SSD files in the repository root:
+
+```text
+MobileNetSSD_deploy.prototxt
+MobileNetSSD_deploy.caffemodel
+```
+
+Create `.env` from `.env.example` and set the services you want to exercise:
+
+```ini
+GEMINI_API_KEY=your_real_key
+ELEVEN_LABS_API_KEY=your_real_key
+BACKBOARD_API_KEY=your_real_key
+```
+
+Gemini, ElevenLabs, and cloud Backboard testing requires an internet connection. Backboard can still retain session-local observations without its cloud key, and audio falls back to local `pyttsx3` if ElevenLabs is unavailable.
+
+##### 2. Verify Camera Detection and Speed
+
+```bash
+python -X utf8 vision.py
+```
+
+Stand in front of the camera and place supported objects such as a chair in view. Press `Ctrl+C` to stop.
+
+**Success:**
+
+- The terminal prints labels such as `person` or `chair`, confidence scores, and pixel bounding boxes.
+- The confidence is at least `0.40` when a result is returned.
+- The reported rate is at least `10 FPS` on the Raspberry Pi.
+- The program exits cleanly with `Ctrl+C` and releases the camera.
+
+##### 3. Verify Camera Distance and Decision Logic
+
+This stage deliberately leaves real audio and cloud services off so the local safety logic can be observed first:
+
+```bash
+python -X utf8 main.py --camera-distance --duration 30
+```
+
+Walk slowly toward the camera while remaining fully visible.
+
+**Success:**
+
+- Startup reports `REAL VisionReader` and `CAMERA BOUNDING-BOX DISTANCE ESTIMATOR`.
+- Each terminal row shows `dist`, detected objects, `fusion`, and `state`.
+- A stable mid-range object must be detected for three consecutive ticks before the state becomes `INFORMATIVE`.
+- Moving very close so the bounding box occupies more than approximately 65% of the frame height produces a distance below `0.60m` and triggers `URGENT` immediately.
+- Moving away returns the system to `SILENT` after the urgent-state hysteresis expires.
+- Rows are appended to `guidesense_log.csv` for later review.
+
+##### 4. Verify the Full Camera + AI + JBL Path
+
+The `--real` flag enables the real audio and urgent-tone outputs. When combined with `--camera-distance`, the Arduino distance reader is not used.
+
+```bash
+python -X utf8 main.py \
+  --camera-distance \
+  --gemini \
+  --backboard \
+  --real \
+  --duration 60
+```
+
+**Successful startup includes messages indicating:**
+
+- `REAL VisionReader`
+- `CAMERA BOUNDING-BOX DISTANCE ESTIMATOR`
+- `REAL AudioOutput + HapticOutput`
+- `Google Gemini Multimodal Scene Narrator ACTIVE`
+- Backboard persistent navigation memory is active, or that local-session fallback is being used
+
+**Successful behavior:**
+
+- A confirmed mid-range detection becomes `INFORMATIVE`, is recorded by Backboard, and produces spoken guidance through the JBL speaker.
+- With a valid ElevenLabs key, startup reports the ElevenLabs voice backend; without it, local `pyttsx3` speaks instead.
+- A near object becomes `URGENT` on the first near-distance tick and starts the non-blocking 880 Hz speaker alarm.
+- Camera detection and the 10 Hz safety loop continue while cloud narration and speech run in background threads.
+
+For an unlimited test, replace `--duration 60` with `--forever` and stop it with `Ctrl+C`.
+
+> **Current Gemini limitation:** `main.py` currently sends Gemini the MobileNet label and estimated distance, not the camera image itself. MobileNet performs the actual image detection locally. Passing encoded camera frames into `GeminiNarrator.describe_scene_async(image_bytes=...)` is a future enhancement for full visual scene description.
+
+##### Common Failure Indicators
+
+| Symptom | Meaning / next check |
+|---|---|
+| `VisionReader failed` followed by mock fallback | Check `/dev/video0`, camera permissions, and both MobileNet model files. |
+| No labels in `vision.py` | Improve lighting, keep the full object visible, and test a supported class such as `person` or `chair`. |
+| FPS below 10 | Reduce other Pi workload and confirm the model is using the native 300x300 input. |
+| Gemini is unavailable | Verify `GEMINI_API_KEY`, internet access, and the `.env` location. |
+| Console speech instead of JBL audio | Verify the JBL is the Pi's selected output and test `python -X utf8 audio.py`. |
+| No `INFORMATIVE` transition | Keep the object visible for at least three ticks with confidence at or above `0.50`. |
+| No `URGENT` transition | Move closer until the estimated distance shown in the trace is below `0.60m`. |
+
 ---
 
 ### CS Senior Track: Fusion, State Machine & Integration
@@ -390,11 +516,11 @@ python -X utf8 main.py --duration 30       # Run for exactly 30 seconds
 
 ## 9. Testing & Quality Assurance Guide
 
-GuideSense contains **58 automated unit tests** covering all nine project brief scenarios, zone boundaries, hysteresis, distance estimation, Gemini narration, ElevenLabs voice, and Backboard memory.
+GuideSense contains **62 automated unit tests** covering all nine project brief scenarios, zone boundaries, hysteresis, distance estimation, vision/audio/haptic/logging adapters, Gemini narration, ElevenLabs voice, and Backboard memory.
 
 ### Running Tests
 ```bash
-# Run all 58 tests:
+# Run all 62 tests:
 pytest
 # Or: python -m pytest
 
