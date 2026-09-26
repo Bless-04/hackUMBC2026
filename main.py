@@ -1,27 +1,51 @@
 """
 main.py — GuideSense Integration Entry Point
 =============================================
-Wires together:
-  • Sensor inputs  (mock by default — swap real modules here)
-  • FusionEngine   (fusion.py)
-  • StateMachine   (state_machine.py)
-  • HardwareInterface (stub or real GPIO/TTS)
+Wires all three tracks together:
 
-----------------------------------------------------------------------
-To switch from mock → real hardware:
-  1. Replace `MockDistanceReader` with the CE freshman's serial reader.
-     It must expose:  read() -> float  (metres)
-  2. Replace `MockVisionReader` with the IT freshman's detector.
-     It must expose:  read() -> list[Detection]
-  3. Replace `HardwareInterface` stub with real TTS + GPIO buzzer class.
-----------------------------------------------------------------------
+  [CE freshman]   serial_reader.SerialDistanceReader  → distance_m
+  [IT freshman]   vision.VisionReader                → list[Detection]
+  [IT freshman]   audio.AudioOutput  \
+  [IT freshman]   haptics.HapticOutput > → HardwareInterface
+  [IT freshman]   logger.EventLogger  /
+
+  [Senior]        fusion.FusionEngine + state_machine.StateMachine
+
+---------------------------------------------------------------------------
+RUNNING MODES
+---------------------------------------------------------------------------
+
+  1. Mock mode (no hardware needed — runs right now):
+       python -X utf8 main.py
+
+  2. Real hardware mode (after teammates hand off their modules):
+       python -X utf8 main.py --real
+
+     The --real flag swaps MockDistanceReader → SerialDistanceReader
+     and MockVisionReader → VisionReader automatically.
+     No changes to fusion.py or state_machine.py needed.
+
+  3. Partial mode (e.g. real distance but mock vision):
+       python -X utf8 main.py --real-distance
+       python -X utf8 main.py --real-vision
+
+---------------------------------------------------------------------------
+INTEGRATION CHECKLIST (senior fills this in at handoff time)
+---------------------------------------------------------------------------
+  [ ] CE freshman's serial_reader.py: read() returns float in metres
+  [ ] IT freshman's vision.py:        read() returns list[Detection]
+  [ ] IT freshman's audio.py:         speak() fires TTS non-blocking
+  [ ] IT freshman's haptics.py:       buzzer_on()/off() agreed protocol with CE
+  [ ] Serial port matches: SERIAL_PORT in serial_reader.py == haptics.py
+  [ ] Label strings from vision.py match fusion.py OBJECT_PRIORITY keys
+  [ ] Run --real for 30 s, verify CSV log looks correct
+  [ ] Run test suite: python -X utf8 -m pytest
 """
 
 from __future__ import annotations
 
-import math
+import argparse
 import time
-import random
 from typing import Optional
 
 from fusion import Detection, FusionEngine, SensorFrame
@@ -32,33 +56,57 @@ from state_machine import HardwareInterface, StateMachine
 # Tick rate
 # ---------------------------------------------------------------------------
 
-TICK_HZ = 10            # updates per second
+TICK_HZ      = 10
 TICK_INTERVAL = 1.0 / TICK_HZ
 
 
 # ---------------------------------------------------------------------------
-# Mock sensor readers  (replace with real hardware below this line)
+# Composite HardwareInterface — wraps audio.py + haptics.py
+# ---------------------------------------------------------------------------
+
+class CompositeHardwareInterface(HardwareInterface):
+    """
+    Bridges the state_machine's hardware calls to the IT freshman's modules.
+    This is the only place senior code touches audio/haptics directly.
+    """
+
+    def __init__(self, audio, haptic) -> None:
+        self._audio  = audio
+        self._haptic = haptic
+
+    def speak(self, text: str) -> None:
+        self._audio.speak(text)
+
+    def buzzer_on(self) -> None:
+        self._haptic.buzzer_on()
+
+    def buzzer_off(self) -> None:
+        self._haptic.buzzer_off()
+
+
+# ---------------------------------------------------------------------------
+# Mock sensor readers (used when real hardware is not available)
 # ---------------------------------------------------------------------------
 
 class MockDistanceReader:
     """
-    Simulates a person walking toward the device and then away.
+    Simulates a person walking toward then away from the device.
 
-    Profile (total ~8 s at 10 Hz):
-      0.0 → 3.0 s : 4.0 m  (far, silent)
-      3.0 → 5.0 s : ramps 4.0 → 1.2 m  (mid, informative)
-      5.0 → 6.0 s : ramps 1.2 → 0.4 m  (near, URGENT)
-      6.0 → 8.0 s : ramps 0.4 → 3.5 m  (clearing, hysteresis then silent)
+    Profile (~8 s at 10 Hz):
+      0–3 s   : 4.0 m (far, silent)
+      3–5 s   : 4.0→1.2 m (mid, informative zone)
+      5–6 s   : 1.2→0.4 m (near, URGENT)
+      6–8 s   : 0.4→3.5 m (clearing, hysteresis then silent)
     """
 
     _PROFILE = [
-        (0.0, 3.0, 4.0,  4.0),    # (t_start, t_end, d_start, d_end)
-        (3.0, 5.0, 4.0,  1.2),
-        (5.0, 6.0, 1.2,  0.4),
-        (6.0, 8.0, 0.4,  3.5),
+        (0.0, 3.0, 4.0, 4.0),
+        (3.0, 5.0, 4.0, 1.2),
+        (5.0, 6.0, 1.2, 0.4),
+        (6.0, 8.0, 0.4, 3.5),
     ]
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._start = time.monotonic()
 
     def read(self) -> float:
@@ -68,68 +116,95 @@ class MockDistanceReader:
                 t = max(elapsed, t0)
                 frac = (t - t0) / (t1 - t0)
                 return d0 + (d1 - d0) * frac
-        return 3.5   # steady far after profile ends
+        return 3.5
 
 
 class MockVisionReader:
     """
-    Simulates detections:
-      • 'chair'  appears at 2 Hz during seconds 3–5  (mid zone)
-      • 'person' appears at 10 Hz during seconds 3–8 (mid → near)
-    Flicker is baked in — chair drops out every other tick to test persistence gate.
+    Flickering detections to exercise all fusion gates.
+      person: ticks 3–8 s (continuous)
+      chair:  ticks 3–5 s (every other tick — tests persistence gate)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._start = time.monotonic()
         self._tick  = 0
 
     def read(self) -> list[Detection]:
         elapsed = time.monotonic() - self._start
         self._tick += 1
-        detections: list[Detection] = []
+        dets: list[Detection] = []
 
         if 3.0 <= elapsed <= 8.0:
-            detections.append(Detection(
-                label="person",
-                confidence=0.85,
-                bbox=(100, 80, 400, 460),
-            ))
+            dets.append(Detection("person", 0.85, (100, 80, 400, 460)))
 
-        # Chair flickers every other tick to validate persistence gate
         if 3.0 <= elapsed <= 5.0 and self._tick % 2 == 0:
-            detections.append(Detection(
-                label="chair",
-                confidence=0.72,
-                bbox=(50, 200, 280, 460),
-            ))
+            dets.append(Detection("chair", 0.72, (50, 200, 280, 460)))
 
-        return detections
+        return dets
 
 
-# ---------------------------------------------------------------------------
-# Real hardware interface stub  (replace with GPIO / pyttsx3 / etc.)
-# ---------------------------------------------------------------------------
-
-class RealHardwareInterface(HardwareInterface):
-    """
-    Drop-in replacement. Uncomment and fill in real hardware calls.
-    """
-
+class MockAudioOutput:
     def speak(self, text: str) -> None:
-        # e.g.:
-        # import pyttsx3
-        # engine = pyttsx3.init()
-        # engine.say(text)
-        # engine.runAndWait()
-        print(f"[TTS]     '{text}'")    # ← replace with real TTS call
+        print(f"[TTS]     '{text}'")
 
-    def buzzer_on(self) -> None:
-        # e.g.: GPIO.output(BUZZER_PIN, GPIO.HIGH)
-        print("[BUZZER]  *** ON ***")   # ← replace with GPIO call
 
-    def buzzer_off(self) -> None:
-        # e.g.: GPIO.output(BUZZER_PIN, GPIO.LOW)
-        print("[BUZZER]  --- off ---")  # ← replace with GPIO call
+class MockHapticOutput:
+    def buzzer_on(self)  -> None: print("[BUZZER]  *** ON ***")
+    def buzzer_off(self) -> None: print("[BUZZER]  --- off ---")
+    def cleanup(self)    -> None: pass
+
+
+# ---------------------------------------------------------------------------
+# Module loader — gracefully falls back to mocks if real module not ready
+# ---------------------------------------------------------------------------
+
+def _load_distance_reader(use_real: bool):
+    if use_real:
+        try:
+            from serial_reader import SerialDistanceReader
+            reader = SerialDistanceReader()
+            print("[main] Using REAL SerialDistanceReader")
+            return reader
+        except Exception as e:
+            print(f"[main] WARNING: SerialDistanceReader failed ({e}), falling back to mock")
+    return MockDistanceReader()
+
+
+def _load_vision_reader(use_real: bool):
+    if use_real:
+        try:
+            from vision import VisionReader
+            reader = VisionReader()
+            print("[main] Using REAL VisionReader")
+            return reader
+        except Exception as e:
+            print(f"[main] WARNING: VisionReader failed ({e}), falling back to mock")
+    return MockVisionReader()
+
+
+def _load_hardware(use_real: bool) -> HardwareInterface:
+    if use_real:
+        try:
+            from audio import AudioOutput
+            from haptics import HapticOutput
+            audio  = AudioOutput()
+            haptic = HapticOutput()
+            print("[main] Using REAL AudioOutput + HapticOutput")
+            return CompositeHardwareInterface(audio, haptic)
+        except Exception as e:
+            print(f"[main] WARNING: Real hardware failed ({e}), falling back to mock")
+    return CompositeHardwareInterface(MockAudioOutput(), MockHapticOutput())
+
+
+def _load_logger(enabled: bool):
+    if enabled:
+        try:
+            from logger import EventLogger
+            return EventLogger()
+        except Exception as e:
+            print(f"[main] WARNING: Logger failed ({e}), running without logging")
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -137,81 +212,102 @@ class RealHardwareInterface(HardwareInterface):
 # ---------------------------------------------------------------------------
 
 def run(
-    distance_reader=None,
-    vision_reader=None,
-    hw: Optional[HardwareInterface] = None,
-    duration_sec: float = 10.0,
-    verbose: bool = True,
+    use_real_distance: bool = False,
+    use_real_vision:   bool = False,
+    use_real_hardware: bool = False,
+    enable_logging:    bool = True,
+    duration_sec:      float = 10.0,
+    verbose:           bool = True,
 ) -> None:
     """
-    Main sensing loop.
+    Main sensing loop.  All arguments default to mock/safe mode.
 
     Args:
-        distance_reader : object with .read() -> float (metres).
-                          Defaults to MockDistanceReader.
-        vision_reader   : object with .read() -> list[Detection].
-                          Defaults to MockVisionReader.
-        hw              : HardwareInterface instance.
-                          Defaults to RealHardwareInterface (stub).
-        duration_sec    : how many seconds to run (0 = run forever).
-        verbose         : print per-tick state to stdout.
+        use_real_distance  : Use serial_reader.SerialDistanceReader instead of mock.
+        use_real_vision    : Use vision.VisionReader instead of mock.
+        use_real_hardware  : Use audio.AudioOutput + haptics.HapticOutput instead of mock.
+        enable_logging     : Write events to CSV via logger.EventLogger.
+        duration_sec       : Seconds to run (0 = forever).
+        verbose            : Print per-tick trace to stdout.
     """
-    distance_reader = distance_reader or MockDistanceReader()
-    vision_reader   = vision_reader   or MockVisionReader()
-    hw              = hw              or RealHardwareInterface()
+    distance_reader = _load_distance_reader(use_real_distance)
+    vision_reader   = _load_vision_reader(use_real_vision)
+    hw              = _load_hardware(use_real_hardware)
+    logger          = _load_logger(enable_logging)
 
     engine = FusionEngine()
     sm     = StateMachine(hw=hw)
-
     start  = time.monotonic()
-    tick   = 0
 
     print("=" * 60)
     print("GuideSense — running")
     print("=" * 60)
 
-    while True:
-        now = time.monotonic()
-        if duration_sec > 0 and (now - start) >= duration_sec:
-            break
+    try:
+        while True:
+            now = time.monotonic()
+            if duration_sec > 0 and (now - start) >= duration_sec:
+                break
 
-        # ------- gather sensor data -------
-        distance_m = distance_reader.read()
-        detections = vision_reader.read()
+            distance_m = distance_reader.read()
+            detections = vision_reader.read()
 
-        frame = SensorFrame(
-            distance_m=distance_m,
-            detections=detections,
-            timestamp=now,
-        )
-
-        # ------- fusion decision ----------
-        result = engine.process(frame)
-
-        # ------- state machine output -----
-        state  = sm.update(result)
-
-        # ------- optional verbose log -----
-        if verbose:
-            det_summary = ", ".join(
-                f"{d.label}({d.confidence:.2f})" for d in detections
-            ) or "—"
-            print(
-                f"t={now - start:5.2f}s  dist={distance_m:.2f}m  "
-                f"dets=[{det_summary}]  "
-                f"fusion={result.action.name:<12}  state={state.name}"
+            frame = SensorFrame(
+                distance_m=distance_m,
+                detections=detections,
+                timestamp=now,
             )
 
-        # ------- sleep to maintain tick rate ------
-        elapsed = time.monotonic() - now
-        sleep_for = max(0.0, TICK_INTERVAL - elapsed)
-        time.sleep(sleep_for)
-        tick += 1
+            result = engine.process(frame)
+            state  = sm.update(result)
+
+            if logger:
+                logger.log_event(frame, result, state)
+
+            if verbose:
+                det_str = ", ".join(
+                    f"{d.label}({d.confidence:.2f})" for d in detections
+                ) or "—"
+                print(
+                    f"t={now - start:5.2f}s  dist={distance_m:.2f}m  "
+                    f"dets=[{det_str}]  "
+                    f"fusion={result.action.name:<12}  state={state.name}"
+                )
+
+            elapsed = time.monotonic() - now
+            time.sleep(max(0.0, TICK_INTERVAL - elapsed))
+
+    finally:
+        # Always clean up hardware and flush log on exit/error
+        if hasattr(hw, '_haptic') and hasattr(hw._haptic, 'cleanup'):
+            hw._haptic.cleanup()
+        if logger:
+            logger.close()
 
     print("=" * 60)
     print("GuideSense — stopped")
     print("=" * 60)
 
 
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
+
 if __name__ == "__main__":
-    run(duration_sec=10.0, verbose=True)
+    parser = argparse.ArgumentParser(description="GuideSense navigation aid")
+    parser.add_argument("--real",          action="store_true", help="Use all real hardware modules")
+    parser.add_argument("--real-distance", action="store_true", help="Use real serial distance reader only")
+    parser.add_argument("--real-vision",   action="store_true", help="Use real camera/detector only")
+    parser.add_argument("--no-log",        action="store_true", help="Disable CSV event logging")
+    parser.add_argument("--forever",       action="store_true", help="Run indefinitely (Ctrl-C to stop)")
+    parser.add_argument("--duration",      type=float, default=10.0, help="Run duration in seconds (default 10)")
+    args = parser.parse_args()
+
+    run(
+        use_real_distance = args.real or args.real_distance,
+        use_real_vision   = args.real or args.real_vision,
+        use_real_hardware = args.real,
+        enable_logging    = not args.no_log,
+        duration_sec      = 0.0 if args.forever else args.duration,
+        verbose           = True,
+    )
