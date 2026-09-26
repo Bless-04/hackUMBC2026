@@ -67,24 +67,33 @@ class HapticOutput:
             print(f"[HapticOutput] stub — mode={self._mode} not connected")
 
     def _speaker_alarm_loop(self) -> None:
-        """Looping urgency tone played through system audio / JBL speaker."""
+        """Looping urgency alarm tone played through system audio / laptop speakers."""
+        import os
         import platform
-        is_windows = platform.system() == "Windows"
+        import subprocess
+
+        system = platform.system()
 
         while not self._stop_event.is_set():
-            if is_windows:
+            if system == "Darwin":  # macOS
+                # Play crisp macOS system alert pulse
+                sound_file = "/System/Library/Sounds/Ping.aiff"
+                if os.path.exists(sound_file):
+                    subprocess.run(["afplay", sound_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                else:
+                    print("\a", end="", flush=True)
+                    time.sleep(0.15)
+            elif system == "Windows":
                 try:
                     import winsound
-                    winsound.Beep(880, 200)  # 880 Hz beep for 200ms
+                    winsound.Beep(1000, 150)
                 except Exception:
-                    time.sleep(0.2)
-            else:
-                # Linux / Raspberry Pi: beep via terminal bell or audio system
-                import os
-                # Generates a quick beep or audio cue
+                    time.sleep(0.15)
+            else:  # Linux / Raspberry Pi
+                print("\a", end="", flush=True)
                 os.system("(speaker-test -t sine -f 880 -l 1 > /dev/null 2>&1) &")
-                time.sleep(0.25)
-            time.sleep(0.05)
+                time.sleep(0.2)
+            time.sleep(0.08)
 
     def buzzer_on(self) -> None:
         if not self._active:
