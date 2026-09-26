@@ -109,10 +109,10 @@ class HapticOutput:
 
     def _speaker_alarm_loop(self, stop_event: threading.Event) -> None:
         while not stop_event.is_set():
-            if platform.system() == "Windows":
+            if platform.system() == "Windows": #Todo: What about the rasberry pi? What happens?
                 try:
                     import winsound
-
+                    # todo Change beep sound cus its annoying
                     winsound.Beep(TONE_HZ, int(TONE_DURATION_SEC * 1000))
                 except (ImportError, RuntimeError):
                     stop_event.wait(TONE_DURATION_SEC)

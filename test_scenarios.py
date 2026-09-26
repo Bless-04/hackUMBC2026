@@ -302,7 +302,7 @@ class TestSpatialDirectionalAwareness(unittest.TestCase):
     """Spatial direction calculation across zones, boundaries, and resolutions."""
 
     def test_object_clearly_on_left(self):
-        from fusion import Direction, compute_direction, Detection
+        from fusion import Detection, Direction, compute_direction
 
         bbox = (10, 50, 100, 200)  # x_center = 55.0, 55/640 = 0.086 < 0.33
         direction = compute_direction(bbox, frame_width=640)
@@ -312,7 +312,7 @@ class TestSpatialDirectionalAwareness(unittest.TestCase):
         self.assertEqual(det.direction, Direction.LEFT)
 
     def test_object_in_center(self):
-        from fusion import Direction, compute_direction, Detection
+        from fusion import Detection, Direction, compute_direction
 
         bbox = (260, 50, 380, 200)  # x_center = 320.0, 320/640 = 0.50 (0.33 - 0.66)
         direction = compute_direction(bbox, frame_width=640)
@@ -322,7 +322,7 @@ class TestSpatialDirectionalAwareness(unittest.TestCase):
         self.assertEqual(det.direction, Direction.CENTER)
 
     def test_object_clearly_on_right(self):
-        from fusion import Direction, compute_direction, Detection
+        from fusion import Detection, Direction, compute_direction
 
         bbox = (500, 50, 620, 200)  # x_center = 560.0, 560/640 = 0.875 > 0.66
         direction = compute_direction(bbox, frame_width=640)
@@ -383,7 +383,7 @@ class TestSpatialDirectionalAwareness(unittest.TestCase):
         self.assertEqual(compute_direction((662, 0, 662, 100), frame_width=width), Direction.RIGHT)   # 0.662 > 0.66
 
     def test_fusion_result_preserves_direction_and_confidence(self):
-        from fusion import Direction, Detection, FusionAction, FusionEngine, SensorFrame, Zone
+        from fusion import Detection, Direction, FusionAction, FusionEngine, SensorFrame, Zone
 
         engine = FusionEngine(persistence_ticks=1, cooldown_sec=12.0)
         det_left = Detection(label="person", confidence=0.82, bbox=(10, 50, 100, 200), frame_width=640)
@@ -458,6 +458,7 @@ class TestGuideSenseHUD(unittest.TestCase):
 
     def setUp(self):
         import numpy as np
+
         from hud import GuideSenseHUD
         self.np = np
         self.hud = GuideSenseHUD(features={

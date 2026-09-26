@@ -5,10 +5,9 @@ from __future__ import annotations
 import queue
 import threading
 from types import ModuleType
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 from fusion import Direction, FusionAction, FusionResult
-
 
 # ---------------------------------------------------------------------------
 # Centralized Natural-Language Voice Formatting
