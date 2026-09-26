@@ -324,9 +324,10 @@ def run(
             result = engine.process(frame)
             state  = sm.update(result)
 
+            frame_img = getattr(vision_reader, "latest_frame", None)
+
             # Render live visual HUD if enabled
             if hud is not None:
-                frame_img = getattr(vision_reader, "latest_frame", None)
                 hud_action = hud.render(
                     frame_img=frame_img,
                     frame=frame,
@@ -339,7 +340,18 @@ def run(
 
             # Trigger Gemini Scene Narrator asynchronously on new confirmed objects
             if gemini_narrator and result.action == FusionAction.INFORMATIVE and result.label:
+                img_bytes = None
+                if frame_img is not None:
+                    try:
+                        import cv2
+                        ok, buf = cv2.imencode(".jpg", frame_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                        if ok:
+                            img_bytes = buf.tobytes()
+                    except Exception:
+                        img_bytes = None
+
                 gemini_narrator.describe_scene_async(
+                    image_bytes=img_bytes,
                     label=result.label,
                     distance_m=distance_m,
                     on_complete=hw.speak,

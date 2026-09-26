@@ -316,7 +316,7 @@ python -X utf8 main.py \
 
 For an unlimited test, replace `--duration 60` with `--forever` and stop it with `Ctrl+C`.
 
-> **Current Gemini limitation:** `main.py` currently sends Gemini the MobileNet label and estimated distance, not the camera image itself. MobileNet performs the actual image detection locally. Passing encoded camera frames into `GeminiNarrator.describe_scene_async(image_bytes=...)` is a future enhancement for full visual scene description.
+> **Multimodal Gemini Vision:** `main.py` automatically captures the live camera frame, encodes it to JPEG bytes, and passes it into `GeminiNarrator.describe_scene_async(image_bytes=...)` alongside the estimated distance and MobileNet label. This enables true multimodal visual scene understanding (orientation, state, context) while keeping local 10 Hz obstacle safety unblocked.
 
 ##### Common Failure Indicators
 
