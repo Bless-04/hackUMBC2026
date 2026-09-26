@@ -4,8 +4,8 @@ version = "0.1.0"
 description = "Chest-worn navigation aid decision core for low-vision users"
 requires-python = ">=3.10"
 
-# Runtime dependencies — empty until teammates uncomment their sections.
-# Hardware packages are listed but commented out so CI stays clean.
+# Runtime dependencies. Raspberry Pi GPIO remains optional because its package
+# cannot be installed on ordinary CI and development machines.
 dependencies = [
     "backboard-sdk>=1.5.0",
     "opencv-python>=4.8",

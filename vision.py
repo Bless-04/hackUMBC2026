@@ -27,7 +27,7 @@ MODEL_WEIGHTS = "MobileNetSSD_deploy.caffemodel"
 # The recommended Caffe MobileNet-SSD checkpoint was trained on the 20 PASCAL
 # VOC classes. The canonicalized spellings below match fusion.OBJECT_PRIORITY
 # (notably ``motorcycle`` and ``couch``).
-COCO_CLASSES = [
+MODEL_CLASSES = [
     "background",
     "airplane",
     "bicycle",
@@ -50,6 +50,9 @@ COCO_CLASSES = [
     "train",
     "tv",
 ]
+# Backward-compatible name retained for teammates that imported the original
+# scaffold constant.
+COCO_CLASSES = MODEL_CLASSES
 
 
 def _model_path(value: str | Path) -> Path:
@@ -156,7 +159,7 @@ class VisionReader:
                 continue
 
             class_index = int(raw[0, 0, index, 1])
-            if class_index <= 0 or class_index >= len(COCO_CLASSES):
+            if class_index <= 0 or class_index >= len(MODEL_CLASSES):
                 continue
 
             scaled = raw[0, 0, index, 3:7] * [width, height, width, height]
@@ -170,7 +173,7 @@ class VisionReader:
 
             results.append(
                 Detection(
-                    label=COCO_CLASSES[class_index],
+                    label=MODEL_CLASSES[class_index],
                     confidence=confidence,
                     bbox=(x1, y1, x2, y2),
                     timestamp=captured_at,

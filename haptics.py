@@ -141,7 +141,6 @@ class HapticOutput:
                 return
             if self._active:
                 return
-            self._active = True
 
             if self._mode == "SPEAKER":
                 # A fresh event avoids an old worker being revived by a rapid
@@ -158,6 +157,7 @@ class HapticOutput:
                 self._serial.write(b"BUZZ_ON\n")
             else:
                 self._gpio.output(self._gpio_pin, self._gpio.HIGH)
+            self._active = True
 
         print("[HapticOutput] *** URGENT ALARM ON ***")
 
@@ -166,7 +166,6 @@ class HapticOutput:
         with self._lock:
             if not self._active:
                 return
-            self._active = False
 
             if self._mode == "SPEAKER" and self._stop_event is not None:
                 self._stop_event.set()
@@ -174,6 +173,7 @@ class HapticOutput:
                 self._serial.write(b"BUZZ_OFF\n")
             elif self._mode == "GPIO":
                 self._gpio.output(self._gpio_pin, self._gpio.LOW)
+            self._active = False
 
         print("[HapticOutput] --- URGENT ALARM OFF ---")
 

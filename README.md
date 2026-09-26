@@ -51,7 +51,7 @@ Because a dedicated physical ultrasonic sensor was unavailable, the Logitech web
                               ▼                                ▼
                   ┌───────────────────────┐        ┌───────────────────────┐
                   │       vision.py       │        │ distance_estimator.py │
-                  │  (MobileNet-SSD COCO) │        │ (or serial_reader.py) │
+                  │  (MobileNet-SSD VOC)  │        │ (or serial_reader.py) │
                   └───────────┬───────────┘        └───────────┬───────────┘
                               │                                │
                      list[Detection]                      distance_m
@@ -237,7 +237,7 @@ class VisionReader:
     def close(self) -> None: ...
 ```
 - **`Detection` Dataclass (defined in `fusion.py`):**
-  - `label: str` — Lowercase COCO class name (e.g. `"person"`, `"chair"`). Must match `OBJECT_PRIORITY` keys in `fusion.py`.
+  - `label: str` — Canonical lowercase class name (e.g. `"person"`, `"chair"`). Must match `OBJECT_PRIORITY` keys in `fusion.py`.
   - `confidence: float` — Detection confidence between `0.0` and `1.0`.
   - `bbox: tuple[int, int, int, int]` — Pixel coordinates `(x1, y1, x2, y2)`.
   - `timestamp: float` — `time.monotonic()` seconds.
