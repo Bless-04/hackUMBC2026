@@ -47,7 +47,7 @@ from __future__ import annotations
 import argparse
 import time
 
-from fusion import Detection, FusionEngine, SensorFrame
+from fusion import Detection, FusionAction, FusionEngine, SensorFrame
 from state_machine import HardwareInterface, StateMachine
 
 # ---------------------------------------------------------------------------
@@ -214,6 +214,7 @@ def run(
     use_camera_distance: bool = False,
     use_real_vision:     bool = False,
     use_real_hardware:   bool = False,
+    enable_gemini:       bool = False,
     enable_logging:      bool = True,
     duration_sec:        float = 10.0,
     verbose:             bool = True,
@@ -226,6 +227,7 @@ def run(
         use_camera_distance : Use camera bounding box height to estimate distance.
         use_real_vision     : Use vision.VisionReader instead of mock.
         use_real_hardware   : Use audio.AudioOutput + haptics.HapticOutput instead of mock.
+        enable_gemini       : Use Google Gemini for contextual scene audio descriptions.
         enable_logging      : Write events to CSV via logger.EventLogger.
         duration_sec        : Seconds to run (0 = forever).
         verbose             : Print per-tick trace to stdout.
@@ -243,6 +245,15 @@ def run(
 
     hw     = _load_hardware(use_real_hardware)
     logger = _load_logger(enable_logging)
+
+    gemini_narrator = None
+    if enable_gemini:
+        from gemini_narrator import GeminiNarrator
+        gemini_narrator = GeminiNarrator()
+        if gemini_narrator.is_available:
+            print("[main] Google Gemini Multimodal Scene Narrator ACTIVE")
+        else:
+            print("[main] WARNING: Gemini requested but API key not available")
 
     engine = FusionEngine()
     sm     = StateMachine(hw=hw)
@@ -274,6 +285,14 @@ def run(
 
             result = engine.process(frame)
             state  = sm.update(result)
+
+            # Trigger Gemini Scene Narrator asynchronously on new confirmed objects
+            if gemini_narrator and result.action == FusionAction.INFORMATIVE and result.label:
+                gemini_narrator.describe_scene_async(
+                    label=result.label,
+                    distance_m=distance_m,
+                    on_complete=hw.speak,
+                )
 
             if distance_reader is not None and hasattr(distance_reader, "send_state"):
                 distance_reader.send_state(state.name)
@@ -314,6 +333,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GuideSense navigation aid")
     parser.add_argument("--real",            action="store_true", help="Use all real hardware modules")
     parser.add_argument("--camera-distance", action="store_true", help="Estimate distance using camera bounding boxes (no ultrasonic sensor)")
+    parser.add_argument("--gemini",          action="store_true", help="Enable Google Gemini multimodal contextual scene description")
     parser.add_argument("--real-distance",   action="store_true", help="Use real serial distance reader only")
     parser.add_argument("--real-vision",     action="store_true", help="Use real camera/detector only")
     parser.add_argument("--no-log",          action="store_true", help="Disable CSV event logging")
@@ -326,6 +346,7 @@ if __name__ == "__main__":
         use_camera_distance = args.camera_distance,
         use_real_vision     = args.real or args.real_vision or args.camera_distance,
         use_real_hardware   = args.real,
+        enable_gemini       = args.gemini,
         enable_logging      = not args.no_log,
         duration_sec        = 0.0 if args.forever else args.duration,
         verbose             = True,

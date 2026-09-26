@@ -28,7 +28,7 @@ import urllib.request
 from typing import Callable, Optional
 
 # Primary and fallback Gemini models
-GEMINI_MODELS = ["gemini-3.8-flash", "gemini-2.5-flash"]
+GEMINI_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3.8-flash"]
 GEMINI_API_URL_TEMPLATE = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
 )
@@ -73,7 +73,7 @@ class GeminiNarrator:
         api_key: Optional[str] = None,
         models: Optional[list[str]] = None,
     ):
-        self.api_key = api_key or load_api_key()
+        self.api_key = load_api_key() if api_key is None else api_key
         self.models = models or GEMINI_MODELS
         self._last_call_time = 0.0
         self._lock = threading.Lock()
@@ -173,7 +173,7 @@ class GeminiNarrator:
         """
         Asynchronous wrapper. Spawns a background daemon thread to query Gemini
         and invokes on_complete(description) when ready.
-        
+
         Returns True if thread was launched, False if throttled or unavailable.
         """
         now = time.monotonic()
