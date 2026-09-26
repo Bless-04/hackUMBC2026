@@ -1,0 +1,53 @@
+[project]
+name = "guidesense"
+version = "0.1.0"
+description = "Chest-worn navigation aid decision core for low-vision users"
+requires-python = ">=3.10"
+
+# Runtime dependencies — empty until teammates uncomment their sections.
+# Hardware packages are listed but commented out so CI stays clean.
+dependencies = [
+    # --- Vision pipeline (IT freshman — uncomment when vision.py is implemented) ---
+    # "opencv-python>=4.8",
+
+    # --- Audio output (IT freshman — uncomment when audio.py is implemented) ---
+    # "pyttsx3>=2.90",
+
+    # --- Serial comms (CE + IT freshman — uncomment when serial_reader/haptics ready) ---
+    # "pyserial>=3.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.4",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.4",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "fusion: Tests for the FusionEngine decision logic",
+    "state_machine: Tests for the StateMachine hardware controller",
+    "scenario: Tests mapped directly to a brief scenario number",
+    "regression: Guard tests added after a bug fix",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]    # pycodestyle errors, pyflakes, isort
+ignore = ["E501"]                 # line length handled separately

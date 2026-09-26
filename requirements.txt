@@ -1,0 +1,18 @@
+# GuideSense — Python dependencies
+# Install: pip install -r requirements.txt
+
+# --- CI / testing ---
+pytest>=7.4
+pytest-cov>=4.1
+
+# --- Vision pipeline (IT freshman) ---
+# opencv-python>=4.8     # uncomment when vision.py is implemented
+
+# --- Audio output (IT freshman) ---
+# pyttsx3>=2.90          # uncomment when audio.py is implemented
+
+# --- Serial comms (CE freshman + IT freshman) ---
+# pyserial>=3.5          # uncomment when serial_reader.py / haptics.py are implemented
+
+# --- Raspberry Pi GPIO (IT freshman, Pi only — not needed on CI) ---
+# RPi.GPIO>=0.7          # DO NOT uncomment on CI — Linux/Pi only
