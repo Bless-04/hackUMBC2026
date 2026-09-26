@@ -1,7 +1,7 @@
 """
-Camera capture and MobileNet-SSD object detection.
+Camera capture and MobileNet-SSD / HOG object detection.
 
-``VisionReader`` owns the webcam and OpenCV DNN model. Its public contract is
+``VisionReader`` owns the webcam and object detection models. Its public contract is
 small on purpose: call :meth:`read` once per sensing tick and :meth:`close` at
 shutdown. A failed frame read is treated as a temporary sensor outage and
 returns an empty list rather than taking down the safety loop.
@@ -83,7 +83,7 @@ def _ensure_model_files(config_path: Path, weights_path: Path) -> None:
 
 
 class VisionReader:
-    """Capture webcam frames and turn MobileNet-SSD output into detections."""
+    """Capture webcam frames and turn vision output into detections."""
 
     def __init__(
         self,
@@ -117,13 +117,13 @@ class VisionReader:
             raise FileNotFoundError(
                 "MobileNet-SSD model file(s) not found: " + ", ".join(missing)
             )
-
         self._cv2: Any = cv2
         self._confidence_floor = float(confidence_floor)
         self._max_detections = max_detections
         self._show_preview = show_preview
         self._closed = False
         self._warned_capture_failure = False
+        self._latest_frame: Any | None = None
 
         try:
             self._net = cv2.dnn.readNetFromCaffe(str(config_path), str(weights_path))
@@ -140,9 +140,14 @@ class VisionReader:
             f"confidence>={self._confidence_floor:.2f}"
         )
 
+    @property
+    def latest_frame(self) -> Any | None:
+        """Returns the most recent raw BGR camera frame."""
+        return self._latest_frame
+
     def read(self) -> list[Detection]:
         """Return detections for one frame, or ``[]`` if capture temporarily fails."""
-        if self._closed:
+        if self._closed or self._cap is None or not self._cap.isOpened():
             return []
 
         try:
@@ -155,6 +160,7 @@ class VisionReader:
             self._warn_capture_failure("no frame returned")
             return []
 
+        self._latest_frame = frame
         self._warned_capture_failure = False
         detections = self._detect(frame)
         if self._show_preview:
@@ -165,50 +171,97 @@ class VisionReader:
         """Run inference for a captured frame (kept separate for focused tests)."""
         cv2 = self._cv2
         height, width = frame.shape[:2]
-        resized = cv2.resize(frame, (INPUT_WIDTH, INPUT_HEIGHT))
-        blob = cv2.dnn.blobFromImage(
-            resized,
-            0.007843,
-            (INPUT_WIDTH, INPUT_HEIGHT),
-            127.5,
-        )
-        self._net.setInput(blob)
-        raw = self._net.forward()
         captured_at = time.monotonic()
         results: list[Detection] = []
 
-        if raw is None or len(raw.shape) < 3:
-            return results
-
-        for index in range(raw.shape[2]):
-            confidence = float(raw[0, 0, index, 2])
-            if not math.isfinite(confidence) or confidence < self._confidence_floor:
-                continue
-
-            class_index = int(raw[0, 0, index, 1])
-            if class_index <= 0 or class_index >= len(MODEL_CLASSES):
-                continue
-
-            scaled = raw[0, 0, index, 3:7] * [width, height, width, height]
-            x1, y1, x2, y2 = (int(value) for value in scaled)
-            x1 = min(max(x1, 0), width - 1)
-            y1 = min(max(y1, 0), height - 1)
-            x2 = min(max(x2, 0), width - 1)
-            y2 = min(max(y2, 0), height - 1)
-            if x2 <= x1 or y2 <= y1:
-                continue
-
-            results.append(
-                Detection(
-                    label=MODEL_CLASSES[class_index],
-                    confidence=confidence,
-                    bbox=(x1, y1, x2, y2),
-                    timestamp=captured_at,
-                )
+        # Path A: MobileNet-SSD Caffe DNN
+        if self._net is not None:
+            resized = cv2.resize(frame, (INPUT_WIDTH, INPUT_HEIGHT))
+            blob = cv2.dnn.blobFromImage(
+                resized,
+                0.007843,
+                (INPUT_WIDTH, INPUT_HEIGHT),
+                127.5,
             )
+            self._net.setInput(blob)
+            raw = self._net.forward()
 
-        # The DNN output order is not a documented ranking. Keeping the most
-        # confident results makes MAX_DETECTIONS deterministic and useful.
+            if raw is not None and len(raw.shape) >= 3:
+                for index in range(raw.shape[2]):
+                    confidence = float(raw[0, 0, index, 2])
+                    if not math.isfinite(confidence) or confidence < self._confidence_floor:
+                        continue
+
+                    class_index = int(raw[0, 0, index, 1])
+                    if class_index <= 0 or class_index >= len(MODEL_CLASSES):
+                        continue
+
+                    scaled = raw[0, 0, index, 3:7] * [width, height, width, height]
+                    x1, y1, x2, y2 = (int(value) for value in scaled)
+                    x1 = min(max(x1, 0), width - 1)
+                    y1 = min(max(y1, 0), height - 1)
+                    x2 = min(max(x2, 0), width - 1)
+                    y2 = min(max(y2, 0), height - 1)
+                    if x2 <= x1 or y2 <= y1:
+                        continue
+
+                    results.append(
+                        Detection(
+                            label=MODEL_CLASSES[class_index],
+                            confidence=confidence,
+                            bbox=(x1, y1, x2, y2),
+                            timestamp=captured_at,
+                            frame_width=width,
+                        )
+                    )
+
+        # Path B: Built-In OpenCV HOG Person Detector Fallback
+        elif self._hog is not None:
+            try:
+                boxes, weights = self._hog.detectMultiScale(
+                    frame,
+                    winStride=(8, 8),
+                    padding=(4, 4),
+                    scale=1.05,
+                )
+                for (x, y, bw, bh), conf in zip(boxes, weights):
+                    conf_float = float(conf)
+                    norm_conf = min(0.95, max(0.50, 0.50 + conf_float * 0.2))
+                    if norm_conf >= self._confidence_floor:
+                        results.append(
+                            Detection(
+                                label="person",
+                                confidence=round(norm_conf, 2),
+                                bbox=(int(x), int(y), int(x + bw), int(y + bh)),
+                                timestamp=captured_at,
+                                frame_width=width,
+                            )
+                        )
+            except Exception as exc:
+                print(f"[VisionReader] HOG inference error: {exc}")
+
+            # Path C: Fallback to Face Cascade
+            if not results and self._face_cascade is not None:
+                try:
+                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    faces = self._face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
+                    for (fx, fy, fw, fh) in faces:
+                        px1 = max(0, fx - int(fw * 0.5))
+                        py1 = max(0, fy - int(fh * 0.2))
+                        px2 = min(width, fx + int(fw * 1.5))
+                        py2 = min(height, fy + int(fh * 5.0))
+                        results.append(
+                            Detection(
+                                label="person",
+                                confidence=0.75,
+                                bbox=(px1, py1, px2, py2),
+                                timestamp=captured_at,
+                                frame_width=width,
+                            )
+                        )
+                except Exception:
+                    pass
+
         results.sort(key=lambda detection: detection.confidence, reverse=True)
         return results[: self._max_detections]
 
@@ -219,7 +272,8 @@ class VisionReader:
         for detection in detections:
             x1, y1, x2, y2 = detection.bbox
             cv2.rectangle(preview, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            label = f"{detection.label} ({detection.confidence:.2f})"
+            dir_str = f" [{detection.direction.name}]" if detection.direction else ""
+            label = f"{detection.label}{dir_str} ({detection.confidence:.2f})"
             cv2.putText(
                 preview,
                 label,
@@ -242,8 +296,9 @@ class VisionReader:
         if self._closed:
             return
         self._closed = True
-        self._cap.release()
-        if self._show_preview:
+        if hasattr(self, "_cap") and self._cap is not None and hasattr(self._cap, "release"):
+            self._cap.release()
+        if self._show_preview and hasattr(self, "_cv2"):
             self._cv2.destroyAllWindows()
 
     def __enter__(self) -> "VisionReader":

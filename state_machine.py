@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import time
 from enum import Enum, auto
-from typing import Optional
+from typing import Optional, Union
 
+from audio import format_voice_message
 from fusion import FusionAction, FusionResult
 
 # ---------------------------------------------------------------------------
@@ -137,7 +138,7 @@ class StateMachine:
         # ----------------------------------------------------------------
         if result.action == FusionAction.INFORMATIVE and result.label:
             if self._state != SystemState.INFORMATIVE or self._active_label != result.label:
-                self._enter_informative(result.label, now)
+                self._enter_informative(result, now)
             return self._state
 
         # ----------------------------------------------------------------
@@ -178,12 +179,19 @@ class StateMachine:
     def _exit_urgent(self) -> None:
         self._ensure_buzzer_off()
 
-    def _enter_informative(self, label: str, now: float) -> None:
+    def _enter_informative(self, result_or_label: Union[FusionResult, str], now: float) -> None:
+        if isinstance(result_or_label, str):
+            label = result_or_label
+            speech_msg = label
+        else:
+            label = result_or_label.label or ""
+            speech_msg = format_voice_message(result=result_or_label)
+
         print(f"[STATE]   {self._state.name} -> INFORMATIVE ('{label}')")
         self._state = SystemState.INFORMATIVE
         self._active_label = label
         self._informative_entered = now
-        self.hw.speak(label)
+        self.hw.speak(speech_msg)
 
     def _enter_silent(self) -> None:
         if self._state != SystemState.SILENT:

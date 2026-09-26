@@ -26,6 +26,49 @@ from enum import Enum, auto
 from typing import Optional
 
 # ---------------------------------------------------------------------------
+# Spatial Direction Enum & Computation
+# ---------------------------------------------------------------------------
+
+class Direction(Enum):
+    LEFT   = auto()
+    CENTER = auto()
+    RIGHT  = auto()
+
+
+def compute_direction(
+    bbox: tuple[int, int, int, int],
+    frame_width: int = 640,
+) -> Direction:
+    """
+    Computes spatial direction (LEFT, CENTER, RIGHT) of an object based on its
+    bounding-box horizontal center normalized against the camera frame width.
+
+    Normalized horizontal position:
+        norm_x = x_center / frame_width
+
+    Zones:
+        LEFT:   norm_x < 0.33
+        CENTER: 0.33 <= norm_x <= 0.66
+        RIGHT:  norm_x > 0.66
+
+    Works with arbitrary camera resolutions (e.g. 640x480, 1280x720, 1920x1080).
+    """
+    if frame_width <= 0:
+        frame_width = 640
+
+    x1, _, x2, _ = bbox
+    x_center = (x1 + x2) / 2.0
+    norm_x = x_center / float(frame_width)
+
+    if norm_x < 0.33:
+        return Direction.LEFT
+    elif norm_x <= 0.66:
+        return Direction.CENTER
+    else:
+        return Direction.RIGHT
+
+
+# ---------------------------------------------------------------------------
 # Shared data contract — agree with both freshmen on day 1
 # ---------------------------------------------------------------------------
 
@@ -36,14 +79,22 @@ class Detection:
     confidence: float                   # 0.0–1.0
     bbox: tuple[int, int, int, int]     # (x1, y1, x2, y2) pixels
     timestamp: float = field(default_factory=time.monotonic)
+    frame_width: Optional[int] = None   # original frame width in pixels (for resolution-independent direction)
+    direction: Optional[Direction] = None  # Spatial direction (LEFT, CENTER, RIGHT)
+
+    def __post_init__(self) -> None:
+        if self.direction is None and self.bbox:
+            fw = self.frame_width if (self.frame_width is not None and self.frame_width > 0) else 640
+            self.direction = compute_direction(self.bbox, fw)
 
 
 @dataclass
 class SensorFrame:
     """One complete sensor snapshot delivered to the fusion engine each tick."""
-    distance_m: float                   # metres, from ultrasonic
+    distance_m: float                   # metres, from ultrasonic or camera distance
     detections: list[Detection]         # may be empty
     timestamp: float = field(default_factory=time.monotonic)
+    frame_width: int = 640              # resolution width for spatial awareness
 
 
 # ---------------------------------------------------------------------------
@@ -68,11 +119,13 @@ class FusionAction(Enum):
 
 @dataclass
 class FusionResult:
-    action:    FusionAction
-    label:     Optional[str] = None    # set when INFORMATIVE
+    action:     FusionAction
+    label:      Optional[str] = None       # set when INFORMATIVE
     distance_m: Optional[float] = None
-    zone:      Optional[Zone]  = None
-    reason:    str = ""                # human-readable debug string
+    zone:       Optional[Zone] = None
+    direction:  Optional[Direction] = None # Direction.LEFT | CENTER | RIGHT
+    confidence: Optional[float] = None     # confidence score of candidate detection
+    reason:     str = ""                   # human-readable debug string
 
 
 # ---------------------------------------------------------------------------
@@ -158,10 +211,19 @@ class FusionEngine:
         # ----------------------------------------------------------------
         if zone == Zone.NEAR:
             self._update_streaks(frame)  # keep streak state consistent
+            best = None
+            if frame.detections:
+                best = max(frame.detections, key=lambda d: _priority(d.label.lower()))
+            direction = (best.direction or compute_direction(best.bbox, frame.frame_width)) if best else None
+            confidence = best.confidence if best else None
+            label = best.label if best else None
             return FusionResult(
                 action=FusionAction.URGENT,
+                label=label,
                 distance_m=frame.distance_m,
                 zone=zone,
+                direction=direction,
+                confidence=confidence,
                 reason=f"Near zone ({frame.distance_m:.2f}m < {self.near_threshold_m}m) — URGENT",
             )
 
@@ -173,13 +235,16 @@ class FusionEngine:
             best = self._best_candidate(frame, frame.timestamp)
             if best is not None:
                 self._last_announced[best.label] = frame.timestamp
+                direction = best.direction or compute_direction(best.bbox, frame.frame_width)
                 return FusionResult(
                     action=FusionAction.INFORMATIVE,
                     label=best.label,
                     distance_m=frame.distance_m,
                     zone=zone,
+                    direction=direction,
+                    confidence=best.confidence,
                     reason=(
-                        f"Mid zone — '{best.label}' conf={best.confidence:.2f} "
+                        f"Mid zone — '{best.label}' ({direction.name}) conf={best.confidence:.2f} "
                         f"persisted {self.persistence_ticks} ticks, cooldown clear"
                     ),
                 )

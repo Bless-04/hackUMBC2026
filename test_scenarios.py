@@ -295,6 +295,239 @@ class TestStateMachineSingleAnnouncement(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Spatial Directional Awareness Tests
+# ---------------------------------------------------------------------------
+
+class TestSpatialDirectionalAwareness(unittest.TestCase):
+    """Spatial direction calculation across zones, boundaries, and resolutions."""
+
+    def test_object_clearly_on_left(self):
+        from fusion import Direction, compute_direction, Detection
+
+        bbox = (10, 50, 100, 200)  # x_center = 55.0, 55/640 = 0.086 < 0.33
+        direction = compute_direction(bbox, frame_width=640)
+        self.assertEqual(direction, Direction.LEFT)
+
+        det = Detection(label="person", confidence=0.85, bbox=bbox, frame_width=640)
+        self.assertEqual(det.direction, Direction.LEFT)
+
+    def test_object_in_center(self):
+        from fusion import Direction, compute_direction, Detection
+
+        bbox = (260, 50, 380, 200)  # x_center = 320.0, 320/640 = 0.50 (0.33 - 0.66)
+        direction = compute_direction(bbox, frame_width=640)
+        self.assertEqual(direction, Direction.CENTER)
+
+        det = Detection(label="chair", confidence=0.80, bbox=bbox, frame_width=640)
+        self.assertEqual(det.direction, Direction.CENTER)
+
+    def test_object_clearly_on_right(self):
+        from fusion import Direction, compute_direction, Detection
+
+        bbox = (500, 50, 620, 200)  # x_center = 560.0, 560/640 = 0.875 > 0.66
+        direction = compute_direction(bbox, frame_width=640)
+        self.assertEqual(direction, Direction.RIGHT)
+
+        det = Detection(label="vehicle", confidence=0.90, bbox=bbox, frame_width=640)
+        self.assertEqual(det.direction, Direction.RIGHT)
+
+    def test_different_camera_resolutions(self):
+        from fusion import Direction, compute_direction
+
+        resolutions = [
+            (300, 300),    # MobileNet native
+            (640, 480),    # Standard VGA
+            (1280, 720),   # 720p HD
+            (1920, 1080),  # 1080p Full HD
+            (3840, 2160),  # 4K UHD
+        ]
+
+        for width, _ in resolutions:
+            # 10% from left edge -> LEFT
+            left_box = (0, 0, int(width * 0.20), 100)
+            self.assertEqual(
+                compute_direction(left_box, frame_width=width),
+                Direction.LEFT,
+                f"Failed for width={width} left",
+            )
+
+            # 50% center -> CENTER
+            center_box = (int(width * 0.40), 0, int(width * 0.60), 100)
+            self.assertEqual(
+                compute_direction(center_box, frame_width=width),
+                Direction.CENTER,
+                f"Failed for width={width} center",
+            )
+
+            # 90% right edge -> RIGHT
+            right_box = (int(width * 0.80), 0, width, 100)
+            self.assertEqual(
+                compute_direction(right_box, frame_width=width),
+                Direction.RIGHT,
+                f"Failed for width={width} right",
+            )
+
+    def test_zone_boundaries(self):
+        from fusion import Direction, compute_direction
+
+        width = 1000  # for clean normalized arithmetic
+
+        # Left/Center boundary at 0.33
+        self.assertEqual(compute_direction((328, 0, 328, 100), frame_width=width), Direction.LEFT)    # 0.328 < 0.33
+        self.assertEqual(compute_direction((330, 0, 330, 100), frame_width=width), Direction.CENTER)  # 0.330 == 0.33
+        self.assertEqual(compute_direction((332, 0, 332, 100), frame_width=width), Direction.CENTER)  # 0.332 > 0.33
+
+        # Center/Right boundary at 0.66
+        self.assertEqual(compute_direction((658, 0, 658, 100), frame_width=width), Direction.CENTER)  # 0.658 < 0.66
+        self.assertEqual(compute_direction((660, 0, 660, 100), frame_width=width), Direction.CENTER)  # 0.660 == 0.66
+        self.assertEqual(compute_direction((662, 0, 662, 100), frame_width=width), Direction.RIGHT)   # 0.662 > 0.66
+
+    def test_fusion_result_preserves_direction_and_confidence(self):
+        from fusion import Direction, Detection, FusionAction, FusionEngine, SensorFrame, Zone
+
+        engine = FusionEngine(persistence_ticks=1, cooldown_sec=12.0)
+        det_left = Detection(label="person", confidence=0.82, bbox=(10, 50, 100, 200), frame_width=640)
+        frame = SensorFrame(distance_m=1.2, detections=[det_left], timestamp=100.0, frame_width=640)
+
+        result = engine.process(frame)
+
+        self.assertEqual(result.action, FusionAction.INFORMATIVE)
+        self.assertEqual(result.label, "person")
+        self.assertEqual(result.distance_m, 1.2)
+        self.assertEqual(result.zone, Zone.MID)
+        self.assertEqual(result.direction, Direction.LEFT)
+        self.assertEqual(result.confidence, 0.82)
+
+
+# ---------------------------------------------------------------------------
+# Directional Voice Output Formatting Tests
+# ---------------------------------------------------------------------------
+
+class TestDirectionalVoiceOutput(unittest.TestCase):
+    """Natural-language voice message formatting with spatial awareness."""
+
+    def test_informative_voice_messages(self):
+        from audio import format_voice_message
+        from fusion import Direction, FusionAction
+
+        # Person on left
+        msg_left = format_voice_message(label="person", direction=Direction.LEFT, action=FusionAction.INFORMATIVE)
+        self.assertEqual(msg_left, "Person on your left.")
+
+        # Chair in center
+        msg_center = format_voice_message(label="chair", direction=Direction.CENTER, action=FusionAction.INFORMATIVE)
+        self.assertEqual(msg_center, "Chair in front of you.")
+
+        # Vehicle on right
+        msg_right = format_voice_message(label="vehicle", direction=Direction.RIGHT, action=FusionAction.INFORMATIVE)
+        self.assertEqual(msg_right, "Vehicle on your right.")
+
+    def test_urgent_hazard_voice_messages(self):
+        from audio import format_voice_message
+        from fusion import Direction, FusionAction
+
+        # Stop. Person on your left.
+        msg_urgent_left = format_voice_message(label="person", direction=Direction.LEFT, action=FusionAction.URGENT)
+        self.assertEqual(msg_urgent_left, "Stop. Person on your left.")
+
+        # Stop. Obstacle ahead. (sonar only, no vision label)
+        msg_urgent_obstacle = format_voice_message(label=None, action=FusionAction.URGENT)
+        self.assertEqual(msg_urgent_obstacle, "Stop. Obstacle ahead.")
+
+    def test_state_machine_speaks_directional_message(self):
+        from fusion import Direction, FusionAction, FusionResult, Zone
+
+        hw = MagicMock(spec=HardwareInterface)
+        sm = StateMachine(hw=hw)
+
+        result = FusionResult(
+            action=FusionAction.INFORMATIVE,
+            label="person",
+            distance_m=1.2,
+            zone=Zone.MID,
+            direction=Direction.LEFT,
+            confidence=0.82,
+        )
+
+        sm.update(result)
+        hw.speak.assert_called_once_with("Person on your left.")
+
+
+class TestGuideSenseHUD(unittest.TestCase):
+    """Verifies HUD drawing across resolutions, states, distance zones, and directions."""
+
+    def setUp(self):
+        import numpy as np
+        from hud import GuideSenseHUD
+        self.np = np
+        self.hud = GuideSenseHUD(features={
+            "Camera": "Real",
+            "Arduino": "Connected",
+            "Gemini": "Active",
+            "Backboard": "Active",
+            "Logging": "Active",
+        })
+
+    def test_hud_draws_on_different_resolutions(self):
+        from fusion import Detection, Direction, FusionAction, FusionResult, SensorFrame, Zone
+        from state_machine import SystemState
+
+        for w, h in [(640, 480), (1280, 720), (1920, 1080)]:
+            canvas = self.np.zeros((h, w, 3), dtype=self.np.uint8)
+            det = Detection("person", 0.92, (int(w * 0.1), int(h * 0.2), int(w * 0.3), int(h * 0.8)), frame_width=w)
+            frame = SensorFrame(distance_m=1.5, detections=[det], frame_width=w)
+            result = FusionResult(
+                action=FusionAction.INFORMATIVE,
+                label="person",
+                distance_m=1.5,
+                zone=Zone.MID,
+                direction=Direction.LEFT,
+                confidence=0.92,
+            )
+
+            rendered = self.hud.draw_hud(canvas, frame, result, SystemState.INFORMATIVE)
+            self.assertEqual(rendered.shape, (h, w, 3))
+            # Image should have drawn elements (not all zeros)
+            self.assertTrue(self.np.any(rendered > 0))
+
+    def test_hud_handles_all_system_states(self):
+        from fusion import Detection, FusionAction, FusionResult, SensorFrame, Zone
+        from state_machine import SystemState
+
+        canvas = self.np.zeros((480, 640, 3), dtype=self.np.uint8)
+        frame = SensorFrame(distance_m=0.4, detections=[Detection("chair", 0.85, (50, 100, 200, 400))], frame_width=640)
+
+        # 1. URGENT state
+        res_urgent = FusionResult(action=FusionAction.URGENT, label="chair", distance_m=0.4, zone=Zone.NEAR)
+        out_urgent = self.hud.draw_hud(canvas, frame, res_urgent, SystemState.URGENT)
+        self.assertEqual(out_urgent.shape, (480, 640, 3))
+
+        # 2. SILENT state
+        res_silent = FusionResult(action=FusionAction.SILENT, distance_m=3.5, zone=Zone.FAR)
+        out_silent = self.hud.draw_hud(canvas, frame, res_silent, SystemState.SILENT)
+        self.assertEqual(out_silent.shape, (480, 640, 3))
+
+    def test_hud_toggle_and_paused_overlay(self):
+        from fusion import FusionAction, FusionResult, SensorFrame, Zone
+        from state_machine import SystemState
+
+        canvas = self.np.zeros((480, 640, 3), dtype=self.np.uint8)
+        frame = SensorFrame(distance_m=1.8, detections=[], frame_width=640)
+        result = FusionResult(action=FusionAction.SILENT, distance_m=1.8, zone=Zone.MID)
+
+        # HUD disabled (clean view)
+        self.hud.show_hud = False
+        out_clean = self.hud.draw_hud(canvas, frame, result, SystemState.SILENT)
+        self.assertEqual(out_clean.shape, (480, 640, 3))
+
+        # HUD paused
+        self.hud.show_hud = True
+        self.hud.is_paused = True
+        out_paused = self.hud.draw_hud(canvas, frame, result, SystemState.SILENT)
+        self.assertTrue(self.np.any(out_paused > 0))
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 

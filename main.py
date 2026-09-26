@@ -141,6 +141,10 @@ class MockVisionReader:
 
         return dets
 
+    @property
+    def latest_frame(self):
+        return None
+
 
 class MockAudioOutput:
     def speak(self, text: str) -> None:
@@ -219,6 +223,7 @@ def run(
     enable_gemini:       bool = False,
     enable_backboard:    bool = False,
     enable_logging:      bool = True,
+    enable_gui:          bool = False,
     duration_sec:        float = 10.0,
     verbose:             bool = True,
 ) -> None:
@@ -235,6 +240,7 @@ def run(
         enable_gemini       : Use Google Gemini for contextual scene audio descriptions.
         enable_backboard    : Use Backboard.io for persistent spatial & session memory.
         enable_logging      : Write events to CSV via logger.EventLogger.
+        enable_gui          : Display live OpenCV visual HUD overlay.
         duration_sec        : Seconds to run (0 = forever).
         verbose             : Print per-tick trace to stdout.
     """
@@ -269,6 +275,24 @@ def run(
         backboard = BackboardMemory()
         print("[main] Backboard.io Persistent Navigation Memory ACTIVE")
 
+    hud = None
+    if enable_gui:
+        try:
+            from hud import GuideSenseHUD
+            cam_mode = "Real" if use_real_vision else ("Camera-Dist" if use_camera_distance else "Mock")
+            ard_mode = "Real" if use_real_distance else "Mock"
+            features_status = {
+                "Camera": cam_mode,
+                "Arduino": ard_mode,
+                "Gemini": "Active" if (gemini_narrator and gemini_narrator.is_available) else "Off",
+                "Backboard": "Active" if backboard else "Off",
+                "Logging": "Active" if logger else "Off",
+            }
+            hud = GuideSenseHUD(features=features_status)
+            print("[main] GuideSense Live Visual HUD ACTIVE")
+        except Exception as e:
+            print(f"[main] WARNING: Could not initialize HUD: {e}")
+
     engine = FusionEngine()
     sm     = StateMachine(hw=hw)
     start  = time.monotonic()
@@ -299,6 +323,19 @@ def run(
 
             result = engine.process(frame)
             state  = sm.update(result)
+
+            # Render live visual HUD if enabled
+            if hud is not None:
+                frame_img = getattr(vision_reader, "latest_frame", None)
+                hud_action = hud.render(
+                    frame_img=frame_img,
+                    frame=frame,
+                    result=result,
+                    state=state,
+                )
+                if hud_action == "QUIT":
+                    print("\n[main] GUI Quit requested by user.")
+                    break
 
             # Trigger Gemini Scene Narrator asynchronously on new confirmed objects
             if gemini_narrator and result.action == FusionAction.INFORMATIVE and result.label:
@@ -335,7 +372,9 @@ def run(
             time.sleep(max(0.0, TICK_INTERVAL - elapsed))
 
     finally:
-        # Always clean up hardware and flush log on exit/error
+        # Always clean up hardware, GUI window, and flush log on exit/error
+        if hud is not None:
+            hud.close()
         if hasattr(hw, '_haptic') and hasattr(hw._haptic, 'cleanup'):
             hw._haptic.cleanup()
         if hasattr(vision_reader, 'close'):
@@ -362,6 +401,7 @@ if __name__ == "__main__":
     parser.add_argument("--backboard",       action="store_true", help="Enable Backboard.io persistent spatial navigation memory")
     parser.add_argument("--real-distance",   action="store_true", help="Use real serial distance reader only")
     parser.add_argument("--real-vision",     action="store_true", help="Use real camera/detector only")
+    parser.add_argument("--gui",             action="store_true", help="Display live visual HUD window overlay")
     parser.add_argument("--no-log",          action="store_true", help="Disable CSV event logging")
     parser.add_argument("--forever",         action="store_true", help="Run indefinitely (Ctrl-C to stop)")
     parser.add_argument("--duration",        type=float, default=10.0, help="Run duration in seconds (default 10)")
@@ -370,13 +410,14 @@ if __name__ == "__main__":
     run(
         use_real_distance   = args.real or args.real_distance,
         use_camera_distance = args.camera_distance,
-        use_real_vision     = args.real or args.real_vision or args.camera_distance,
+        use_real_vision     = args.real or args.real_vision or args.camera_distance or args.gui,
         use_real_hardware   = args.real,
         camera_index        = args.camera,
         show_preview        = args.preview,
         enable_gemini       = args.gemini,
         enable_backboard    = args.backboard,
         enable_logging      = not args.no_log,
+        enable_gui          = args.gui,
         duration_sec        = 0.0 if args.forever else args.duration,
         verbose             = True,
     )
