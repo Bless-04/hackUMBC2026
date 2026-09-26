@@ -180,8 +180,8 @@ python -X utf8 serial_reader.py
 2. Download MobileNet-SSD Caffe weights into the project root:
    - `MobileNetSSD_deploy.prototxt`
    - `MobileNetSSD_deploy.caffemodel`
-3. Install OpenCV if not already present: `pip install opencv-python`
-4. In `vision.py`, uncomment the OpenCV DNN reader code in `VisionReader.read()`.
+3. Install the project dependencies: `pip install -r requirements.txt`.
+4. Confirm both model files are present before starting the camera reader.
 5. Test standalone:
 ```bash
 python -X utf8 vision.py
