@@ -215,6 +215,7 @@ def run(
     use_real_vision:     bool = False,
     use_real_hardware:   bool = False,
     enable_gemini:       bool = False,
+    enable_backboard:    bool = False,
     enable_logging:      bool = True,
     duration_sec:        float = 10.0,
     verbose:             bool = True,
@@ -228,6 +229,7 @@ def run(
         use_real_vision     : Use vision.VisionReader instead of mock.
         use_real_hardware   : Use audio.AudioOutput + haptics.HapticOutput instead of mock.
         enable_gemini       : Use Google Gemini for contextual scene audio descriptions.
+        enable_backboard    : Use Backboard.io for persistent spatial & session memory.
         enable_logging      : Write events to CSV via logger.EventLogger.
         duration_sec        : Seconds to run (0 = forever).
         verbose             : Print per-tick trace to stdout.
@@ -254,6 +256,12 @@ def run(
             print("[main] Google Gemini Multimodal Scene Narrator ACTIVE")
         else:
             print("[main] WARNING: Gemini requested but API key not available")
+
+    backboard = None
+    if enable_backboard:
+        from backboard_memory import BackboardMemory
+        backboard = BackboardMemory()
+        print("[main] Backboard.io Persistent Navigation Memory ACTIVE")
 
     engine = FusionEngine()
     sm     = StateMachine(hw=hw)
@@ -292,6 +300,13 @@ def run(
                     label=result.label,
                     distance_m=distance_m,
                     on_complete=hw.speak,
+                )
+
+            # Record confirmed objects into Backboard persistent spatial memory
+            if backboard and result.action == FusionAction.INFORMATIVE and result.label:
+                backboard.record_observation(
+                    label=result.label,
+                    distance_m=distance_m,
                 )
 
             if distance_reader is not None and hasattr(distance_reader, "send_state"):
@@ -334,6 +349,7 @@ if __name__ == "__main__":
     parser.add_argument("--real",            action="store_true", help="Use all real hardware modules")
     parser.add_argument("--camera-distance", action="store_true", help="Estimate distance using camera bounding boxes (no ultrasonic sensor)")
     parser.add_argument("--gemini",          action="store_true", help="Enable Google Gemini multimodal contextual scene description")
+    parser.add_argument("--backboard",       action="store_true", help="Enable Backboard.io persistent spatial navigation memory")
     parser.add_argument("--real-distance",   action="store_true", help="Use real serial distance reader only")
     parser.add_argument("--real-vision",     action="store_true", help="Use real camera/detector only")
     parser.add_argument("--no-log",          action="store_true", help="Disable CSV event logging")
@@ -347,6 +363,7 @@ if __name__ == "__main__":
         use_real_vision     = args.real or args.real_vision or args.camera_distance,
         use_real_hardware   = args.real,
         enable_gemini       = args.gemini,
+        enable_backboard    = args.backboard,
         enable_logging      = not args.no_log,
         duration_sec        = 0.0 if args.forever else args.duration,
         verbose             = True,

@@ -1,23 +1,20 @@
 """
 backboard_memory.py — Persistent Spatial & Session Memory via Backboard.io
 ==========================================================================
-Integrates Backboard.io to give GuideSense durable long-term memory:
-  - Tracks navigation history, obstacles seen, landmarks passed, and user habits.
-  - Allows contextual memory recall across threads (e.g. "Where did I leave my chair?").
-  - Works with Backboard REST API or SDK, with graceful local fallback if offline.
+Integrates Backboard.io to give GuideSense durable long-term spatial memory:
+  - Stores persistent landmarks, obstacle events, and spatial navigation context.
+  - Uses Backboard SDK (or REST) for durable Memory & RAG storage.
+  - Automatically queries memory and passes context to Gemini + ElevenLabs.
+  - Operates asynchronously: NEVER blocks the 10 Hz local safety loop.
 """
 
 from __future__ import annotations
 
-import json
+import asyncio
 import os
 import threading
 import time
-import urllib.error
-import urllib.request
 from typing import Callable, Optional
-
-BACKBOARD_API_URL = "https://api.backboard.io/v1/messages"
 
 
 def load_backboard_key() -> Optional[str]:
@@ -44,23 +41,54 @@ class BackboardMemory:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        assistant_id: Optional[str] = None,
-        thread_id: Optional[str] = None,
+        assistant_name: str = "GuideSense Assistant",
     ):
         self.api_key = load_backboard_key() if api_key is None else api_key
-        self.assistant_id = assistant_id or os.environ.get("BACKBOARD_ASSISTANT_ID", "guidesense-assistant")
-        self.thread_id = thread_id or os.environ.get("BACKBOARD_THREAD_ID")
+        self.assistant_name = assistant_name
+        self.assistant_id = None
         self._local_history: list[dict] = []
         self._lock = threading.Lock()
+        self._client = None
 
         if self.api_key:
-            print(f"[BackboardMemory] Initialized with key ({self.api_key[:8]}...) assistant={self.assistant_id}")
+            print(f"[BackboardMemory] Initialized with key ({self.api_key[:8]}...)")
+            self._init_client_async()
         else:
             print("[BackboardMemory] Local session memory mode (set BACKBOARD_API_KEY in .env for cloud persistence)")
 
     @property
     def is_cloud_enabled(self) -> bool:
         return bool(self.api_key)
+
+    def _init_client_async(self) -> None:
+        """Initialize BackboardClient in background to get/create assistant ID."""
+        def _setup():
+            try:
+                from backboard import BackboardClient
+                client = BackboardClient(api_key=self.api_key)
+
+                async def _get_assistant():
+                    assistants = await client.list_assistants()
+                    for a in assistants:
+                        if getattr(a, "name", "") == self.assistant_name:
+                            await client.aclose()
+                            return a.assistant_id
+                    # Create if not found
+                    new_a = await client.create_assistant(
+                        name=self.assistant_name,
+                        description="Spatial memory assistant for GuideSense low-vision navigation",
+                        system_prompt="Track landmarks, obstacles, and navigation history for a visually impaired user.",
+                    )
+                    await client.aclose()
+                    return new_a.assistant_id
+
+                self.assistant_id = asyncio.run(_get_assistant())
+                print(f"[BackboardMemory] Connected to Assistant ID: {self.assistant_id}")
+            except Exception as e:
+                print(f"[BackboardMemory] Cloud initialization note: {e}")
+
+        t = threading.Thread(target=_setup, daemon=True)
+        t.start()
 
     def record_observation(
         self,
@@ -69,7 +97,7 @@ class BackboardMemory:
         description: Optional[str] = None,
     ) -> None:
         """
-        Record an observed object/hazard into memory.
+        Record an observed object/hazard into memory asynchronously.
         """
         entry = {
             "timestamp": time.time(),
@@ -80,69 +108,141 @@ class BackboardMemory:
         with self._lock:
             self._local_history.append(entry)
 
-        # Sync to Backboard cloud asynchronously if key is configured
+        # Sync to Backboard cloud asynchronously
         if self.is_cloud_enabled:
             def _sync():
-                prompt = (
-                    f"Observation update: The user's chest camera detected a '{label}' "
-                    f"at {distance_m:.1f} metres ahead. Context: {entry['description']}"
-                )
-                self.send_memory_update(prompt)
+                # Wait briefly for assistant_id if still initializing
+                for _ in range(10):
+                    if self.assistant_id and self._client:
+                        break
+                    time.sleep(0.3)
+
+                if self.assistant_id:
+                    try:
+                        from backboard import BackboardClient
+
+                        async def _add():
+                            client = BackboardClient(api_key=self.api_key)
+                            content = (
+                                f"Navigation observation: A {label} was detected at approximately "
+                                f"{distance_m:.1f} metres ahead. Context: {entry['description']}"
+                            )
+                            await client.add_memory(
+                                assistant_id=self.assistant_id,
+                                content=content,
+                            )
+                            await client.aclose()
+
+                        asyncio.run(_add())
+                    except Exception as e:
+                        print(f"[BackboardMemory] Cloud memory save error: {e}")
 
             t = threading.Thread(target=_sync, daemon=True)
             t.start()
 
-    def send_memory_update(self, content: str) -> Optional[str]:
-        """Sends an observation or message to Backboard.io."""
-        if not self.api_key:
-            return None
+    def get_recent_memories(self, limit: int = 5) -> list[str]:
+        """Fetch the most recent memory statements."""
+        if self.assistant_id:
+            try:
+                from backboard import BackboardClient
 
-        payload = {
-            "content": content,
-            "assistant_id": self.assistant_id,
-            "memory": "Auto",
-        }
-        if self.thread_id:
-            payload["thread_id"] = self.thread_id
+                async def _fetch():
+                    client = BackboardClient(api_key=self.api_key)
+                    res = await client.get_memories(assistant_id=self.assistant_id)
+                    await client.aclose()
+                    return [m.content for m in getattr(res, "memories", [])][:limit]
 
-        req = urllib.request.Request(
-            BACKBOARD_API_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
+                return asyncio.run(_fetch())
+            except Exception:
+                pass
 
-        try:
-            with urllib.request.urlopen(req, timeout=5.0) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                if "thread_id" in data:
-                    self.thread_id = data["thread_id"]
-                return data.get("content")
-        except Exception as e:
-            print(f"[BackboardMemory] Cloud sync error: {e}")
-            return None
+        # Fallback to local history
+        with self._lock:
+            return [
+                f"{h['label']} at {h['distance_m']}m"
+                for h in reversed(self._local_history[-limit:])
+            ]
 
     def query_memory_async(self, question: str, on_response: Callable[[str], None]) -> None:
         """
-        Asynchronously answers user questions using local or cloud Backboard memory.
+        Asynchronously answers user questions using Backboard persistent memory
+        combined with Gemini for natural phrasing.
         """
         def _worker():
-            if self.is_cloud_enabled:
-                reply = self.send_memory_update(question)
-                if reply:
-                    on_response(reply)
-                    return
+            # 1. If Backboard cloud is connected, try Backboard's semantic search + Gemini completion
+            if self.is_cloud_enabled and self.assistant_id:
+                try:
+                    from backboard import BackboardClient
 
-            # Local fallback memory search
-            with self._lock:
-                if not self._local_history:
-                    on_response("I have not detected any objects in this session yet.")
-                    return
-                latest = self._local_history[-1]
-                on_response(f"The last object detected was a {latest['label']} about {latest['distance_m']} metres away.")
+                    async def _query_backboard():
+                        client = BackboardClient(api_key=self.api_key)
+                        # Semantic search for relevant memories
+                        res = await client.search_memories(
+                            assistant_id=self.assistant_id, query=question
+                        )
+                        raw_mems = res.get("memories", []) if isinstance(res, dict) else getattr(res, "memories", [])
+                        mems = [m.get("content", "") if isinstance(m, dict) else getattr(m, "content", "") for m in raw_mems]
+
+                        # Fallback to general recent memories if search was empty
+                        if not mems:
+                            mres = await client.get_memories(assistant_id=self.assistant_id)
+                            mems = [m.content for m in getattr(mres, "memories", [])][:5]
+
+                        if not mems:
+                            await client.aclose()
+                            return None
+
+                        # Ask assistant thread with Gemini 3.8 Flash
+                        thread = await client.create_thread(assistant_id=self.assistant_id)
+                        ctx = " ".join(mems)
+                        prompt = (
+                            f"Context from navigation memory: {ctx}\n"
+                            f"User question: {question}\n"
+                            "Answer in 1 concise sentence for a blind user navigating with GuideSense."
+                        )
+                        resp = await client.send_message(
+                            thread_id=thread.thread_id,
+                            content=prompt,
+                            llm_provider="google",
+                            model_name="gemini-3.8-flash",
+                        )
+                        await client.aclose()
+                        return resp.content if resp else None
+
+                    reply = asyncio.run(_query_backboard())
+                    if reply:
+                        on_response(reply)
+                        return
+                except Exception as e:
+                    print(f"[BackboardMemory] Cloud query note: {e}")
+
+            # 2. Fallback to local history + direct Gemini narrator
+            memories = self.get_recent_memories(limit=5)
+            if not memories:
+                on_response("I have not recorded any navigation landmarks in memory yet.")
+                return
+
+            mem_context = "; ".join(memories)
+
+            # Try generating a conversational reply via Gemini if available
+            try:
+                from gemini_narrator import GeminiNarrator
+                narrator = GeminiNarrator()
+                if narrator.is_available:
+                    prompt = (
+                        f"The user is asking: '{question}'. "
+                        f"Here is their recent navigation memory history: {mem_context}. "
+                        f"Answer their question in 1 concise sentence based on these memories."
+                    )
+                    reply = narrator.describe_scene(label=prompt)
+                    if reply:
+                        on_response(reply)
+                        return
+            except Exception:
+                pass
+
+            # Fallback direct reply
+            on_response(f"Based on your recent journey: {mem_context}")
 
         t = threading.Thread(target=_worker, daemon=True)
         t.start()
@@ -154,11 +254,20 @@ class BackboardMemory:
 
 if __name__ == "__main__":
     mem = BackboardMemory()
-    mem.record_observation("chair", 1.5, "A wooden chair in the hallway")
-    print(f"Recorded observation. Total in memory: {len(mem._local_history)}")
+    print("Waiting 1.5s for Backboard cloud sync...")
+    time.sleep(1.5)
+
+    print("Recording observation of 'chair' at 1.5m...")
+    mem.record_observation("chair", 1.5, "A wooden chair in the hallway path")
+    time.sleep(1.0)
+
+    done_event = threading.Event()
 
     def print_reply(text):
-        print(f"Memory Query Response: \"{text}\"")
+        print(f"\nAI Memory Query Response:\n-> \"{text}\"")
+        done_event.set()
 
-    mem.query_memory_async("What did I see recently?", on_response=print_reply)
-    time.sleep(0.5)
+    print("Querying memory: 'Did I see any chairs?'...")
+    mem.query_memory_async("Did I see any chairs?", on_response=print_reply)
+    done_event.wait(timeout=6.0)
+    print("Done.")

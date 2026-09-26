@@ -32,34 +32,67 @@ import threading
 
 class AudioOutput:
     """
-    Non-blocking TTS speaker.
-
-    The senior calls speak() from the main loop — it must return quickly.
-    Use a daemon thread so it doesn't block the tick rate.
+    Non-blocking voice speaker.
+    Prefers ElevenLabs natural voice if API key is present in .env,
+    with automatic fallback to local offline pyttsx3.
     """
 
     def __init__(self) -> None:
-        # IT freshman: initialise pyttsx3 engine here
-        # import pyttsx3
-        # self._engine = pyttsx3.init()
-        # self._engine.setProperty("rate", 150)   # words per minute
-        # self._engine.setProperty("volume", 1.0)
         self._lock = threading.Lock()
-        print("[AudioOutput] stub — TTS not connected")
+        self._eleven = None
+        self._pyttsx3_engine = None
+
+        # 1. Try initializing ElevenLabs
+        try:
+            from eleven_audio import ElevenLabsVoice
+            voice = ElevenLabsVoice()
+            if voice.is_available:
+                self._eleven = voice
+                print("[AudioOutput] ElevenLabs Studio Voice ACTIVE")
+        except Exception:
+            pass
+
+        # 2. Setup local pyttsx3 fallback
+        try:
+            import pyttsx3
+            self._pyttsx3_engine = pyttsx3.init()
+            self._pyttsx3_engine.setProperty("rate", 150)
+            self._pyttsx3_engine.setProperty("volume", 1.0)
+        except Exception:
+            pass
+
+        if not self._eleven and not self._pyttsx3_engine:
+            print("[AudioOutput] Console text fallback mode")
 
     def speak(self, text: str) -> None:
         """
-        Speak `text` aloud.  Returns immediately (fires background thread).
-
-        IT freshman TODO:
-            def _run():
-                with self._lock:               # prevent overlap
-                    self._engine.say(text)
-                    self._engine.runAndWait()
-            t = threading.Thread(target=_run, daemon=True)
-            t.start()
+        Speak `text` aloud non-blocking (fires background daemon thread).
         """
-        print(f"[AudioOutput] stub speak: '{text}'")
+        def _run():
+            with self._lock:
+                # 1. Try ElevenLabs
+                if self._eleven:
+                    try:
+                        success = self._eleven.speak(text)
+                        if success:
+                            return
+                    except Exception as e:
+                        print(f"[AudioOutput] ElevenLabs error, falling back: {e}")
+
+                # 2. Try pyttsx3
+                if self._pyttsx3_engine:
+                    try:
+                        self._pyttsx3_engine.say(text)
+                        self._pyttsx3_engine.runAndWait()
+                        return
+                    except Exception:
+                        pass
+
+                # 3. Console print fallback
+                print(f"[TTS Audio] '{text}'")
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +102,7 @@ class AudioOutput:
 if __name__ == "__main__":
     import time
     tts = AudioOutput()
-    for word in ["person", "chair", "bicycle"]:
-        print(f"Speaking: {word}")
-        tts.speak(word)
-        time.sleep(2.5)
+    print("Testing AudioOutput...")
+    tts.speak("GuideSense initialized with Gemini, ElevenLabs, and Backboard.")
+    time.sleep(3.0)
+    print("Done.")

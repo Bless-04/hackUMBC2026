@@ -1,16 +1,34 @@
-# GuideSense — Decision Core & Integration Manual
+# GuideSense — Decision Core & Developer Manual
 
 > **Chest-worn assistive navigation device for low-vision users.**  
 > Fuses computer vision and proximity data to deliver real-time audio and haptic guidance: staying silent when clear, speaking calm contextual announcements once, and alerting urgently when hazards are near.
 
 ---
 
+## Table of Contents
+1. [System Architecture & Hardware Setup](#1-system-architecture--hardware-setup)
+2. [Team Ownership Matrix](#2-team-ownership-matrix)
+3. [Developer Setup & Environment](#3-developer-setup--environment)
+4. [Step-by-Step Developer Implementation Guides](#4-step-by-step-developer-implementation-guides)
+   - [CE Track: Arduino & Breadboard Controller](#ce-track-arduino--breadboard-controller)
+   - [IT Track: Vision, Audio & Haptics](#it-track-vision-audio--haptics)
+   - [CS Senior Track: Fusion, State Machine & Integration](#cs-senior-track-fusion-state-machine--integration)
+5. [Data Contracts & Interface Signatures](#5-data-contracts--interface-signatures)
+6. [Core Decision Logic & Priority Rules](#6-core-decision-logic--priority-rules)
+7. [AI Cloud Suite: Gemini + ElevenLabs + Backboard](#7-ai-cloud-suite-gemini--elevenlabs--backboard)
+8. [Operational Modes & CLI Reference](#8-operational-modes--cli-reference)
+9. [Testing & Quality Assurance Guide](#9-testing--quality-assurance-guide)
+10. [Linting, Code Quality & CI](#10-linting-code-quality--ci)
+11. [Troubleshooting & Gotchas](#11-troubleshooting--gotchas)
+
+---
+
 ## 1. System Architecture & Hardware Setup
 
 ### Physical Hardware Inventory
-- **Compute:** Raspberry Pi (runs main loop, fusion engine, state machine, and computer vision)
+- **Compute:** Raspberry Pi (executes main sensing loop, fusion engine, state machine, and computer vision)
 - **Vision & Depth:** Logitech Webcam (USB)
-- **Audio & Alerts:** JBL Speaker (connected via 3.5mm AUX, USB, or Bluetooth)
+- **Audio Output:** JBL Speaker (connected via 3.5mm AUX, USB, or Bluetooth)
 - **Hardware Indicators:** Arduino Uno/Nano + Breadboard + Status LEDs (Green, Yellow, Red) + optional Potentiometer
 - **Wearable:** Chest harness mounting the Pi, camera, breadboard, and speaker
 
@@ -63,19 +81,151 @@ Because a dedicated physical ultrasonic sensor was unavailable, the Logitech web
 
 ---
 
-## 2. Team Track Split & Responsibilities
+## 2. Team Ownership Matrix
 
-| Role | Teammate | Modules Owned | Primary Responsibilities |
+| Role | Teammate | Files Owned | Responsibilities |
 |---|---|---|---|
 | **CS Senior** | Integration Lead | `fusion.py`, `state_machine.py`, `distance_estimator.py`, `main.py`, `tests/` | Decision core logic, priority ranking, persistence & cooldown gates, state transitions, hardware abstraction, CI/CD, mock integration. |
 | **CE Freshman** | Hardware & Sensors | `arduino_guidesense/arduino_guidesense.ino`, `serial_reader.py` | Flash Arduino sketch, wire breadboard status LEDs (Green/Yellow/Red) and optional potentiometer dial, physical chest harness assembly. |
-| **IT Freshman** | Vision, Audio, Logging | `vision.py`, `audio.py`, `haptics.py`, `logger.py` | Logitech webcam frame capture & MobileNet-SSD detection, pyttsx3 voice on JBL speaker, urgent audio alert loop on JBL speaker, CSV session logging. |
+| **IT Freshman** | Vision, Audio, Logging | `vision.py`, `audio.py`, `haptics.py`, `logger.py`, `eleven_audio.py` | Logitech webcam frame capture & MobileNet-SSD detection, pyttsx3/ElevenLabs voice on JBL speaker, urgent audio alert loop on JBL speaker, CSV session logging. |
 
 ---
 
-## 3. Data Contracts & Interfaces (Critical for Integration)
+## 3. Developer Setup & Environment
 
-Each module is strictly decoupled. Teammates must adhere to these exact function signatures:
+GuideSense uses standard Python `pip` and `venv` (with optional `uv` support).
+
+### 1. Clone & Set Up Virtual Environment (Standard `pip` — Recommended)
+```bash
+git clone https://github.com/your-org/hackUMBC2026.git
+cd hackUMBC2026
+
+# Create virtual environment:
+python -m venv .venv
+
+# Activate virtual environment:
+# On Windows PowerShell:
+.\.venv\Scripts\Activate.ps1
+# On Linux / Raspberry Pi / macOS:
+source .venv/bin/activate
+
+# Install all development and testing dependencies:
+pip install -r requirements.txt
+```
+
+*(Optional for `uv` users: `uv sync --dev` also works).*
+
+### 3. Environment Variables (`.env`)
+Copy the example template to create your `.env` file:
+```bash
+cp .env.example .env
+```
+Open `.env` and fill in your keys:
+```ini
+# Google Gemini API Key (for multimodal contextual scene description)
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# ElevenLabs API Key (for studio-quality voice output through JBL speaker)
+ELEVEN_LABS_API_KEY=your_elevenlabs_api_key_here
+
+# Backboard.io API Key (optional — for persistent spatial memory)
+BACKBOARD_API_KEY=your_backboard_api_key_here
+```
+*(Note: `.env` is ignored in `.gitignore` on line 154 to protect secrets).*
+
+### 4. Linux / Raspberry Pi System Permissions
+If running on the Raspberry Pi:
+```bash
+# Allow serial access to Arduino without sudo:
+sudo usermod -a -G dialout $USER
+
+# Install ALSA audio tools and espeak for local TTS fallback:
+sudo apt update && sudo apt install -y alsa-utils espeak
+```
+
+---
+
+## 4. Step-by-Step Developer Implementation Guides
+
+### CE Track: Arduino & Breadboard Controller
+
+#### Step 1: Flash Arduino Sketch
+Open `arduino_guidesense/arduino_guidesense.ino` in the Arduino IDE and upload it to the board.
+
+#### Step 2: Breadboard Wiring
+| Arduino Pin | Breadboard Component | Function |
+|---|---|---|
+| **Pin 2** | Green LED (with 220Ω resistor to GND) | Lights when state is `SILENT` (path clear) |
+| **Pin 3** | Yellow LED (with 220Ω resistor to GND) | Lights when state is `INFORMATIVE` (mid-range object) |
+| **Pin 4** | Red LED (with 220Ω resistor to GND) | Lights when state is `URGENT` (hazard detected) |
+| **Pin A0** | Potentiometer center wiper pin | Optional: manual distance dial (sends `D:<cm>\n` over serial) |
+| **5V / GND** | Power rails | Connect Arduino 5V and GND to breadboard rails |
+
+#### Step 3: Implement & Test `serial_reader.py`
+In `serial_reader.py`:
+1. Verify `SERIAL_PORT`: `"COM3"` / `"COM4"` on Windows, `"/dev/ttyUSB0"` or `"/dev/ttyACM0"` on Raspberry Pi.
+2. Uncomment the `pyserial` reading logic in `SerialDistanceReader.read()`.
+3. Test standalone:
+```bash
+python -X utf8 serial_reader.py
+```
+*Expected Output:* Prints live distance readings in metres (`0.450 m`, `1.520 m`) and responds to serial state commands.
+
+---
+
+### IT Track: Vision, Audio & Haptics
+
+#### Step 1: Camera & Model Setup (`vision.py`)
+1. Connect the Logitech webcam via USB.
+2. Download MobileNet-SSD Caffe weights into the project root:
+   - `MobileNetSSD_deploy.prototxt`
+   - `MobileNetSSD_deploy.caffemodel`
+3. Install OpenCV if not already present: `pip install opencv-python`
+4. In `vision.py`, uncomment the OpenCV DNN reader code in `VisionReader.read()`.
+5. Test standalone:
+```bash
+python -X utf8 vision.py
+```
+*Expected Output:* Prints detected objects (`person`, `chair`), confidence, and bounding box coordinates at $\ge 10\text{ FPS}$.
+
+#### Step 2: Audio & Voice Setup (`audio.py` / `eleven_audio.py`)
+- GuideSense automatically routes speech to **ElevenLabs** if `ELEVEN_LABS_API_KEY` is present in `.env`, falling back to local `pyttsx3` offline.
+- Test standalone:
+```bash
+python -X utf8 audio.py
+```
+*Expected Output:* Natural voice speaks `"GuideSense initialized with Gemini, ElevenLabs, and Backboard."` through the JBL speaker.
+
+#### Step 3: Urgent Alert Setup (`haptics.py`)
+- Emits a pulsing 880 Hz urgency tone via a non-blocking background thread when `URGENT` triggers.
+- Test standalone:
+```bash
+python -X utf8 haptics.py
+```
+*Expected Output:* Emits urgency tone for 1 second, pauses for 1 second, and repeats.
+
+---
+
+### CS Senior Track: Fusion, State Machine & Integration
+
+- Owns the core decision loop, rule priority, and final integration.
+- Can run the system against mock data, camera distance, or full hardware:
+```bash
+# 1. Simulated mock mode (tests logic without hardware)
+python -X utf8 main.py
+
+# 2. Camera-only distance estimation (uses Logitech webcam bounding box)
+python -X utf8 main.py --camera-distance
+
+# 3. Full hardware integration + AI cloud suite
+python -X utf8 main.py --camera-distance --gemini --backboard --real
+```
+
+---
+
+## 5. Data Contracts & Interface Signatures
+
+Every module conforms strictly to these signatures:
 
 ### 1. Vision Module (`vision.py`)
 ```python
@@ -86,7 +236,7 @@ class VisionReader:
     def read(self) -> list[Detection]: ...
     def close(self) -> None: ...
 ```
-- **`Detection` structure:**
+- **`Detection` Dataclass (defined in `fusion.py`):**
   - `label: str` — Lowercase COCO class name (e.g. `"person"`, `"chair"`). Must match `OBJECT_PRIORITY` keys in `fusion.py`.
   - `confidence: float` — Detection confidence between `0.0` and `1.0`.
   - `bbox: tuple[int, int, int, int]` — Pixel coordinates `(x1, y1, x2, y2)`.
@@ -109,8 +259,7 @@ class SerialDistanceReader:
 class AudioOutput:
     def speak(self, text: str) -> None: ...
 ```
-- Must be **non-blocking** (run via a daemon thread or quick async task) so it never halts the 10 Hz sensing loop.
-- Emits voice through the connected JBL speaker.
+- Must be **non-blocking** (run via background thread) so it never halts the 10 Hz sensing loop.
 
 ### 4. Urgent Alert / Haptics (`haptics.py`)
 ```python
@@ -119,8 +268,7 @@ class HapticOutput:
     def buzzer_off(self) -> None: ...
     def cleanup(self) -> None: ...
 ```
-- Plays a continuous 880 Hz urgent siren through the JBL speaker while active.
-- Both methods are **idempotent** (safe to call multiple times without side effects).
+- Both methods are **idempotent** (safe to call repeatedly without side effects).
 
 ### 5. Event Logger (`logger.py`)
 ```python
@@ -128,28 +276,13 @@ class EventLogger:
     def log_event(self, frame: SensorFrame, result: FusionResult, state: SystemState) -> None: ...
     def close(self) -> None: ...
 ```
-- Appends CSV records to `guidesense_log.csv` every tick for post-run analysis and demo verification.
+- Appends CSV records to `guidesense_log.csv` every tick for post-run analysis.
 
 ---
 
-## 4. Arduino Breadboard Controller (`arduino_guidesense.ino`)
+## 6. Core Decision Logic & Priority Rules
 
-The CE freshman flashes the sketch located in `arduino_guidesense/arduino_guidesense.ino`:
-
-### Breadboard Wiring
-| Arduino Pin | Component | Purpose |
-|---|---|---|
-| **Pin 2** | Green LED (with 220Ω resistor to GND) | Lights when system state is `SILENT` (clear path) |
-| **Pin 3** | Yellow LED (with 220Ω resistor to GND) | Lights when system state is `INFORMATIVE` (mid-range object) |
-| **Pin 4** | Red LED (with 220Ω resistor to GND) | Lights when system state is `URGENT` (proximity hazard) |
-| **Pin A0** | Potentiometer center wiper pin | Optional: manual distance dial (sends `D:<cm>\n` over serial) |
-| **5V / GND** | Breadboard power rails | Power rails for LEDs and potentiometer |
-
----
-
-## 5. Core Decision Logic (`fusion.py` & `state_machine.py`)
-
-Every tick (10 Hz), the decision engine executes the following ordered rules:
+Every tick (10 Hz), the decision engine executes the following ordered rules in `fusion.py` and `state_machine.py`:
 
 1. **Distance Zone Evaluation (Always Checked First):**
    - $\text{distance} < 0.60\,\text{m} \rightarrow$ **NEAR Zone**
@@ -171,200 +304,108 @@ Every tick (10 Hz), the decision engine executes the following ordered rules:
    $$\text{person} > \text{bicycle/motorcycle} > \text{car} > \text{dog} > \text{chair} > \text{table/couch} > \text{other}$$
 
 5. **Buzzer Hysteresis Window (`state_machine.py`):**
-   - When distance clears out of the NEAR zone, the urgent alarm stays active for **1.5 seconds** before silencing. This prevents chattering/flickering at the 60 cm boundary.
+   - When distance clears out of the NEAR zone, the urgent alarm stays active for **1.5 seconds** before silencing. This prevents chattering at the 60 cm boundary.
 
 ---
 
-## 6. Running GuideSense
+## 7. AI Cloud Suite: Gemini + ElevenLabs + Backboard
 
-GuideSense uses [`uv`](https://docs.astral.sh/uv/) for Python packaging and virtual environments.
-
-### Install & Synchronize
-```bash
-# Clone the repository
-git clone https://github.com/your-org/hackUMBC2026.git
-cd hackUMBC2026
-
-# Install development environment and dependencies
-uv sync --dev
+```
+   10 Hz Local Safety Core (0ms Latency)
+   [Logitech Camera] ──▶ [fusion.py + state_machine.py] ──▶ Urgent 880Hz Siren / Haptics
+                               │
+               (When INFORMATIVE action triggers)
+                               ▼
+   ┌─────────────────────────────────────────────────────────────┐
+   │                     AI CLOUD SUITE                          │
+   │                                                             │
+   │  1. Backboard.io (Durable Spatial Memory & Orchestration)   │
+   │     • Stores persistent landmarks & obstacle observations   │
+   │     • Semantic vector search (`search_memories`)            │
+   │     • Unified LLM reasoning with Gemini 3.8 Flash           │
+   │     • Pre-configured with Gemini & ElevenLabs API keys      │
+   │                                                             │
+   │  2. Google Gemini (Multimodal Vision & Context Reasoning)   │
+   │     • Generates natural 1-2 sentence assistive guidance     │
+   │     • Accessible directly via REST or routed via Backboard  │
+   │                                                             │
+   │  3. ElevenLabs (Studio-Quality Ultra-Low Latency Speech)    │
+   │     • Speaks guidance in natural, human voice (George)      │
+   │     • Zero-dependency PCM-to-WAV playback on JBL speaker    │
+   └─────────────────────────────────────────────────────────────┘
 ```
 
-### Operational Modes
+### Unified Orchestration via Backboard
+GuideSense is designed with a **flexible hybrid AI architecture**:
+- **Platform-Level Key Routing:** When your Backboard account has Google Gemini and ElevenLabs API keys configured in the Backboard dashboard, Backboard serves as the central intelligent backend. It retrieves spatial memory landmarks via vector similarity (`search_memories`), constructs the assistive prompt, and invokes `gemini-3.8-flash` via `send_message` with memory context.
+- **Direct Edge Fallback:** If cloud memory is temporarily unreachable or running offline, GuideSense falls back seamlessly to direct Google Gemini REST API (`gemini_narrator.py`) and local text-to-speech (`pyttsx3` / local voice).
+- **Zero Loop Blocking:** All AI calls run in non-blocking background daemon threads. The 10 Hz obstacle detection and urgent siren loop are **never delayed** by network latency.
 
-#### 1. Simulated / Mock Mode (Runs immediately without any hardware)
+### Testing AI Modules Standalone
+Each AI cloud integration can be verified individually before running the full system:
+
 ```bash
-uv run python -X utf8 main.py
-```
-*Simulates a person approaching from 4.0m to 0.4m, testing the full SILENT $\rightarrow$ INFORMATIVE $\rightarrow$ URGENT $\rightarrow$ SILENT pipeline.*
+# 1. Test Backboard.io Persistent Spatial Memory & Gemini Recall:
+python -X utf8 backboard_memory.py
 
-#### 2. Webcam Distance Mode (Logitech Webcam Connected, No Ultrasonic Sensor)
-```bash
-uv run python -X utf8 main.py --camera-distance
-```
-*Uses the Logitech webcam for both object detection and monocular distance estimation.*
+# 2. Test ElevenLabs Natural Voice Playback on JBL Speaker:
+python -X utf8 eleven_audio.py
 
-#### 3. Full Real Hardware Mode (Arduino Breadboard + Webcam + JBL Speaker)
-# From the CE freshman's ultrasonic serial reader:
-distance_m: float          # metres, e.g. 1.47
-
-# From the IT freshman's vision module:
-detections: list[Detection]
-
-# Detection fields:
-Detection(
-    label:      str,                    # e.g. "person", "chair"
-    confidence: float,                  # 0.0 – 1.0
-    bbox:       tuple[int,int,int,int], # (x1, y1, x2, y2) pixels
-    timestamp:  float,                  # time.monotonic()
-)
-```
-
----
-
-## Hardware Testing & Subsystem Verification
-
-Before running full end-to-end integration, test each individual hardware subsystem independently:
-
-### 1. Camera Focal Length Calibration (`calibrate.py`)
-Calibrate your webcam to compute the exact `FOCAL_LENGTH_PX` constant for pinhole distance calculation:
-```bash
-# Calibrate using standing person at 2.0 m (default)
-python3 calibrate.py --height 170.0 --distance 200.0
-
-# Calibrate using a standard chair (85 cm) at 1.5 m (150 cm)
-python3 calibrate.py --height 85.0 --distance 150.0
-```
-* **Steps**: Press `SPACE` / `ENTER` to freeze the frame, drag a bounding box from top to bottom of the object, and press `ENTER`.
-* **Output**: Copy the calculated `FOCAL_LENGTH_PX` value into `distance.py`.
-
----
-
-### 2. Camera-Only Distance Estimation (`distance.py` / `main.py`)
-Test bounding-box distance calculation without physical ultrasonic hardware:
-```bash
-# Run GuideSense using monocular camera distance estimation
-python3 main.py --camera-distance
-
-# Or run with live camera detection and camera distance
-python3 main.py --live --duration 20
+# 3. Test Google Gemini Scene Narrator:
+python -X utf8 gemini_narrator.py
 ```
 
 ---
 
-### 3. Vision Module Test (`vision.py`)
-Test camera capture and real-time object detector:
-```bash
-python3 vision.py
-```
-* **Expected Output**: Continuous stream of detections (`label`, `confidence`, `bbox`) at $\ge 10\text{ FPS}$.
+## 8. Operational Modes & CLI Reference
 
----
-
-### 4. Audio / TTS Subsystem Test (`audio.py`)
-Test non-blocking speech synthesis:
-```bash
-python3 audio.py
-```
-* **Expected Output**: Speaks `"person"`, `"chair"`, `"bicycle"` in order with audible pauses, without hanging the console.
-
----
-
-### 5. Haptics / Buzzer Test (`haptics.py`)
-Test buzzer activation and cleanup:
-```bash
-python3 haptics.py
-```
-* **Expected Output**: Buzzer turns ON for 1.0 s, OFF for 1.0 s, and ON for 1.0 s before clean exit.
-
----
-
-### 6. Ultrasonic Serial Distance Reader (`serial_reader.py`)
-Test Arduino/microcontroller USB serial distance streaming:
-```bash
-python3 serial_reader.py
-```
-* **Expected Output**: Live stream of distance readings in metres (e.g. `1.45m`, `0.52m`).
-
----
-
-### 7. End-to-End Live Integration (`main.py`)
-
-Run the full system in your target hardware configuration:
+All execution modes are accessible via `main.py`:
 
 ```bash
-# 1. Full Real Hardware (Serial distance + Camera Vision + Audio/Haptics)
-python3 main.py --real
+# 1. Full AI Cloud Suite (Webcam Distance + Gemini + ElevenLabs + Backboard Memory)
+python -X utf8 main.py --camera-distance --gemini --backboard
 
-# 2. Camera-Only Distance Mode (No ultrasonic sensor needed)
-python3 main.py --camera-distance
+# 2. Camera-Only Distance Mode (No physical ultrasonic sensor)
+python -X utf8 main.py --camera-distance
 
-# 3. Partial Real Modes (for incremental testing)
-python3 main.py --real-distance   # Real ultrasonic + mock vision
-python3 main.py --real-vision     # Real camera vision + mock distance
+# 3. Simulated Mock Mode (Runs immediately with mock sensor streams)
+python -X utf8 main.py
 
-# 4. Generate Judge CSV Log Evidence
-python3 main.py --real --log
+# 4. Full Real Hardware Mode (Physical Arduino + Camera + Speaker)
+python -X utf8 main.py --real
+
+# 5. Continuous Execution (Run indefinitely until Ctrl+C)
+python -X utf8 main.py --camera-distance --forever
+
+# 6. Granular Hardware Flags:
+python -X utf8 main.py --real-distance     # Real serial distance only
+python -X utf8 main.py --real-vision       # Real camera detector only
+python -X utf8 main.py --no-log            # Disable CSV event logging
+python -X utf8 main.py --duration 30       # Run for exactly 30 seconds
 ```
 
----
-
-## Swapping in Real Hardware
-
-Everything is modular and swappable in **`main.py`**:
+> **Note for Windows:** Always include `-X utf8` to ensure UTF-8 console output without CP1252 errors.
 
 ---
 
-## Tunable Parameters
+## 9. Testing & Quality Assurance Guide
 
-All thresholds live at the top of `fusion.py` and `state_machine.py` — no hunting through logic:
+GuideSense contains **58 automated unit tests** covering all nine project brief scenarios, zone boundaries, hysteresis, distance estimation, Gemini narration, ElevenLabs voice, and Backboard memory.
 
-| Parameter | Default | File | Effect |
-|---|---|---|---|
-| `NEAR_THRESHOLD_M` | `0.60 m` | `fusion.py` | URGENT trigger distance |
-| `MID_THRESHOLD_M` | `2.00 m` | `fusion.py` | Max range for announcements |
-| `CONFIDENCE_MIN` | `0.50` | `fusion.py` | Minimum detection confidence |
-| `PERSISTENCE_TICKS` | `3` | `fusion.py` | Frames needed to confirm object |
-| `COOLDOWN_SEC` | `12.0 s` | `fusion.py` | Re-announcement lockout |
-| `URGENT_HYSTERESIS_SEC` | `1.5 s` | `state_machine.py` | Buzzer exit delay |
-| `TICK_HZ` | `10` | `main.py` | Sensor poll rate |
-
----
-
-## Test Coverage
-
+### Running Tests
 ```bash
-uv run python -X utf8 main.py --real
-```
+# Run all 58 tests:
+pytest
+# Or: python -m pytest
 
-#### 4. Additional CLI Options
-```bash
-uv run python -X utf8 main.py --camera-distance --forever   # Run continuously until Ctrl+C
-uv run python -X utf8 main.py --real-distance              # Only real serial reader, mock vision
-uv run python -X utf8 main.py --real-vision                # Only real camera, mock distance
-uv run python -X utf8 main.py --no-log                     # Disable CSV session logging
-uv run python -X utf8 main.py --duration 30                # Run for 30 seconds
-```
+# Run only the 9 required competition scenarios:
+pytest -m scenario
 
-> **Note for Windows:** Always include `-X utf8` to ensure UTF-8 console output.
+# Run regression & boundary guard tests:
+pytest -m regression
 
----
-
-## 7. Testing & Verification
-
-GuideSense includes 46 unit tests covering all 9 project brief scenarios, zone boundaries, hysteresis, and distance estimation:
-
-```bash
-# Run all tests
-uv run pytest
-
-# Run only the 9 required competition scenarios
-uv run pytest -m scenario
-
-# Run regression & boundary guard tests
-uv run pytest -m regression
-
-# Run with test coverage report
-uv run pytest --cov=fusion --cov=state_machine --cov=distance_estimator
+# Run with test coverage report:
+pytest --cov=fusion --cov=state_machine --cov=distance_estimator --cov=gemini_narrator --cov=eleven_audio --cov=backboard_memory
 ```
 
 ### Scenario Test Coverage Matrix
@@ -382,13 +423,50 @@ uv run pytest --cov=fusion --cov=state_machine --cov=distance_estimator
 | **+** | Buzzer stays on during 1.5s hysteresis window | `TestUrgentHysteresis` |
 | **+** | Voice announcements are idempotent per label | `TestInformativeState` |
 | **+** | Monocular distance maps bounding box height to zones | `test_distance_estimator.py` |
+| **+** | Gemini scene narrator generates contextual voice guidance | `test_gemini_narrator.py` |
+| **+** | ElevenLabs voice synthesis with WAV header & async playback | `test_eleven_audio.py` |
+| **+** | Backboard persistent spatial memory & query recall | `test_backboard_memory.py` |
 
 ---
 
-## 8. Continuous Integration (CI)
+## 10. Linting, Code Quality & CI
 
-A GitHub Actions workflow is active under `.github/workflows/ci.yml`. On every push and pull request, it:
+The repository enforces strict code quality and formatting via [`ruff`](https://docs.astral.sh/ruff/):
+
+```bash
+# Check code for style & lint errors:
+ruff check .
+# Or: python -m ruff check .
+
+# Automatically fix fixable issues:
+ruff check --fix .
+
+# Format code:
+ruff format .
+```
+
+### GitHub Actions CI Workflow (`.github/workflows/ci.yml`)
+On every push and pull request to any branch, the CI pipeline automatically:
 1. Provisions Python 3.10, 3.11, and 3.12 runners.
-2. Installs `uv` and synchronizes dependencies.
-3. Executes `pytest` with coverage report generation.
-4. Runs `ruff` linting across all source and test files.
+2. Installs dependencies from `requirements.txt` via `pip`.
+3. Runs the full test suite with coverage reporting.
+4. Executes `ruff` linting across the entire codebase.
+
+---
+
+## 11. Troubleshooting & Gotchas
+
+1. **`UnicodeEncodeError: 'charmap' codec can't encode character...`**
+   - **Solution:** On Windows PowerShell / Command Prompt, run Python with the `-X utf8` flag: `uv run python -X utf8 main.py`.
+
+2. **Serial Permission Denied on Linux / Raspberry Pi (`/dev/ttyUSB0`)**
+   - **Solution:** Add your user to the `dialout` group: `sudo usermod -a -G dialout $USER`, then log out and back in.
+
+3. **No Sound from JBL Speaker on Raspberry Pi**
+   - **Solution:** Run `speaker-test -t sine -f 880 -l 1` to verify ALSA output. Check audio device index using `aplay -l`.
+
+4. **ElevenLabs `HTTP 402: Free users cannot use library voices`**
+   - **Solution:** Free tier accounts must use pre-made voices (such as `JBFqnCBsd6RMkjVDRZzb` - George) instead of community library voice clones. GuideSense is preconfigured with this voice.
+
+5. **Camera Distance Estimation reads too close / too far**
+   - **Solution:** Ensure `DEFAULT_FRAME_HEIGHT = 480` in `distance_estimator.py` matches your camera capture resolution. If capturing at 720p, set `frame_height=720`.
