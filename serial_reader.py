@@ -1,118 +1,132 @@
 """
-serial_reader.py — CE Freshman's Module
-========================================
-Reads ultrasonic distance over USB serial from the Arduino.
+serial_reader.py — GuideSense Ultrasonic Serial Reader Module
+==============================================================
+Reads ultrasonic distance measurements streamed from the Arduino over USB serial.
 
-OWNED BY: Freshman #1 (Computer Engineering)
-HANDED OFF TO: Senior (CS) via the read() interface below.
+Data contract:
+  serial_reader.SerialDistanceReader().read() -> float (metres)
 
-Data contract with senior:
-  serial_reader.SerialDistanceReader().read() -> float   (metres)
-
-Serial protocol (Arduino sends one line per reading):
-  "D:<distance_cm>\n"
-  e.g.  "D:143\n"  → 1.43 m
-
-Arduino sketch responsibilities (also owned by CE freshman):
-  - HC-SR04 trigger on GPIO pin (see Part 3 Path A for wiring)
-  - Reads distance, sends "D:<cm>\\n" at ~20 Hz over USB serial
-  - Buzzer pin toggled by a separate signal from the Pi (see haptics.py)
-
-How to test standalone (before handoff):
-  python -X utf8 serial_reader.py
-  → prints live distance readings to stdout
+Protocol:
+  Arduino transmits: "D:<distance_cm>\\n"  (e.g. "D:145\\n" -> 1.45 m)
+  Pi/Host transmits: "STATE:<SILENT|INFORMATIVE|URGENT>\\n" to toggle Arduino breadboard LEDs
 """
 
 from __future__ import annotations
 
+import glob
+import sys
 import time
+from typing import Optional
 
-# ---------------------------------------------------------------------------
-# Configuration — CE freshman sets these to match their Arduino sketch
-# ---------------------------------------------------------------------------
-
-SERIAL_PORT   = "/dev/ttyUSB0"   # adjust: /dev/ttyACM0 on some Pi setups
+SERIAL_PORT   = "/dev/ttyUSB0"
 BAUD_RATE     = 9600
-READ_TIMEOUT  = 0.1              # seconds before giving up on a line
-FALLBACK_DIST = 3.0              # metres — returned if serial read fails
+READ_TIMEOUT  = 0.08
+FALLBACK_DIST = 3.5  # metres (FAR zone)
 
 
-# ---------------------------------------------------------------------------
-# Real implementation — CE freshman fills this in
-# ---------------------------------------------------------------------------
+def auto_detect_serial_port() -> Optional[str]:
+    """Scan and return the first available Arduino/microcontroller USB serial port."""
+    patterns = [
+        "/dev/tty.usbmodem*",
+        "/dev/tty.usbserial*",
+        "/dev/ttyUSB*",
+        "/dev/ttyACM*",
+        "COM*",
+    ]
+    for pattern in patterns:
+        matches = glob.glob(pattern)
+        if matches:
+            return matches[0]
+    return None
+
 
 class SerialDistanceReader:
     """
-    Reads one distance value from the Arduino over USB serial.
-
-    Usage:
-        reader = SerialDistanceReader()
-        metres = reader.read()   # call this every tick
-
-    The senior's main.py calls reader.read() at TICK_HZ (10 Hz).
-    The Arduino sends at ~20 Hz — this just grabs the latest line.
+    Reads real-time distance measurements from the Arduino microcontroller.
+    Auto-detects active serial ports on macOS, Linux, and Windows.
     """
 
     def __init__(
         self,
-        port: str = SERIAL_PORT,
+        port: Optional[str] = None,
         baud: int = BAUD_RATE,
         timeout: float = READ_TIMEOUT,
     ) -> None:
-        # CE freshman: uncomment and fill in when hardware is ready
-        # import serial
-        # self._ser = serial.Serial(port, baud, timeout=timeout)
-        # time.sleep(2)   # let Arduino reset after serial connect
-        self._port    = port
-        self._baud    = baud
+        self._baud = baud
         self._timeout = timeout
-        self._last    = FALLBACK_DIST
-        print(f"[SerialReader] stub — port={port} baud={baud}  (not connected)")
+        self._last = FALLBACK_DIST
+        self._ser = None
+
+        target_port = port or auto_detect_serial_port() or SERIAL_PORT
+        self._port = target_port
+        self._init_serial(target_port)
+
+    def _init_serial(self, port: str) -> None:
+        try:
+            import serial
+            self._ser = serial.Serial(port, self._baud, timeout=self._timeout)
+            time.sleep(1.5)  # Allow Arduino bootloader to initialize
+            print(f"[SerialReader] Connected to Arduino on {port} ({self._baud} baud)")
+        except ImportError:
+            print("[SerialReader] pyserial not installed (pip install pyserial). Running in simulation fallback mode.")
+        except Exception as e:
+            print(f"[SerialReader] Serial port {port} unavailable ({e}). Using fallback.")
 
     def read(self) -> float:
         """
-        Return the most recent distance in METRES.
-        Returns FALLBACK_DIST on any read error so the system degrades gracefully.
+        Returns the latest distance reading in METRES.
+        Falls back to 3.5m (FAR zone) if no active stream is received.
+        """
+        if self._ser is None or not self._ser.is_open:
+            return self._last
 
-        CE freshman TODO:
+        try:
+            # Drain buffer to read the freshest line
+            while self._ser.in_waiting > 32:
+                self._ser.readline()
+
             line = self._ser.readline().decode("utf-8", errors="ignore").strip()
             if line.startswith("D:"):
-                cm = float(line[2:])
-                self._last = cm / 100.0
-            return self._last
-        """
-        # Stub: return fallback until real hardware is wired
+                cm_str = line[2:].strip()
+                cm = float(cm_str)
+                if 2.0 <= cm <= 500.0:
+                    self._last = round(cm / 100.0, 2)
+        except Exception:
+            pass
+
         return self._last
 
     def send_state(self, state_name: str) -> None:
-        """
-        Sends the current SystemState to the Arduino to control Breadboard LEDs.
-        (Green = SILENT, Yellow = INFORMATIVE, Red = URGENT)
-        """
-        # CE freshman TODO:
-        #   if hasattr(self, "_ser") and self._ser and self._ser.is_open:
-        #       self._ser.write(f"STATE:{state_name}\n".encode("utf-8"))
-        pass
+        """Transmits current system state to Arduino to drive Breadboard LEDs."""
+        if self._ser is not None and self._ser.is_open:
+            try:
+                msg = f"STATE:{state_name}\n".encode("utf-8")
+                self._ser.write(msg)
+            except Exception:
+                pass
 
     def close(self) -> None:
-        """Call on shutdown to release the serial port."""
-        # if hasattr(self, "_ser") and self._ser:
-        #     self._ser.close()
-        pass
+        """Closes serial connection cleanly."""
+        if self._ser is not None and self._ser.is_open:
+            try:
+                self._ser.close()
+                print("[SerialReader] Serial port closed.")
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
-# Standalone test — run directly to verify serial comms before handoff
+# Standalone test
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     reader = SerialDistanceReader()
-    print("Reading distance. Ctrl-C to stop.")
+    print("Reading serial distance stream. Press Ctrl-C to stop.\n")
     try:
         while True:
-            dist = reader.read()
-            print(f"  {dist:.3f} m")
+            d = reader.read()
+            print(f"Distance: {d:.2f} m", end="\r", flush=True)
             time.sleep(0.1)
     except KeyboardInterrupt:
         reader.close()
-        print("Done.")
+        print("\n[SerialReader] Stopped.")

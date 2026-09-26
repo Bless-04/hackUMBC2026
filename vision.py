@@ -74,6 +74,7 @@ class VisionReader:
         model_config: str | Path = MODEL_CONFIG,
         model_weights: str | Path = MODEL_WEIGHTS,
         max_detections: int = MAX_DETECTIONS,
+        show_preview: bool = False,
     ) -> None:
         if not 0.0 <= confidence_floor <= 1.0:
             raise ValueError("confidence_floor must be between 0.0 and 1.0")
@@ -98,6 +99,7 @@ class VisionReader:
         self._cv2: Any = cv2
         self._confidence_floor = float(confidence_floor)
         self._max_detections = max_detections
+        self._show_preview = show_preview
         self._closed = False
         self._warned_capture_failure = False
 
@@ -132,7 +134,10 @@ class VisionReader:
             return []
 
         self._warned_capture_failure = False
-        return self._detect(frame)
+        detections = self._detect(frame)
+        if self._show_preview:
+            self._render_preview(frame, detections)
+        return detections
 
     def _detect(self, frame: Any) -> list[Detection]:
         """Run inference for a captured frame (kept separate for focused tests)."""
@@ -185,17 +190,39 @@ class VisionReader:
         results.sort(key=lambda detection: detection.confidence, reverse=True)
         return results[: self._max_detections]
 
+    def _render_preview(self, frame: Any, detections: list[Detection]) -> None:
+        """Display a live camera preview with bounding boxes and labels."""
+        cv2 = self._cv2
+        preview = frame.copy()
+        for detection in detections:
+            x1, y1, x2, y2 = detection.bbox
+            cv2.rectangle(preview, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            label = f"{detection.label} ({detection.confidence:.2f})"
+            cv2.putText(
+                preview,
+                label,
+                (x1, max(20, y1 - 8)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 255, 0),
+                2,
+            )
+        cv2.imshow("GuideSense - Vision Preview", preview)
+        cv2.waitKey(1)
+
     def _warn_capture_failure(self, detail: str) -> None:
         if not self._warned_capture_failure:
             print(f"[VisionReader] camera frame unavailable: {detail}")
             self._warned_capture_failure = True
 
     def close(self) -> None:
-        """Release the camera. Safe to call more than once."""
+        """Release the camera and preview window. Safe to call more than once."""
         if self._closed:
             return
         self._closed = True
         self._cap.release()
+        if self._show_preview:
+            self._cv2.destroyAllWindows()
 
     def __enter__(self) -> "VisionReader":
         return self
@@ -205,7 +232,14 @@ class VisionReader:
 
 
 if __name__ == "__main__":
-    reader = VisionReader()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="GuideSense vision benchmark")
+    parser.add_argument("--camera", type=int, default=CAMERA_INDEX, help="webcam index")
+    parser.add_argument("--gui", action="store_true", help="show the camera preview")
+    args = parser.parse_args()
+
+    reader = VisionReader(camera_index=args.camera, show_preview=args.gui)
     print("Running detection benchmark. Ctrl-C to stop.")
     frame_count = 0
     benchmark_start = time.monotonic()
