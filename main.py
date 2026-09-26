@@ -212,28 +212,39 @@ def _load_logger(enabled: bool):
 # ---------------------------------------------------------------------------
 
 def run(
-    use_real_distance: bool = False,
-    use_real_vision:   bool = False,
-    use_real_hardware: bool = False,
-    enable_logging:    bool = True,
-    duration_sec:      float = 10.0,
-    verbose:           bool = True,
+    use_real_distance:   bool = False,
+    use_camera_distance: bool = False,
+    use_real_vision:     bool = False,
+    use_real_hardware:   bool = False,
+    enable_logging:      bool = True,
+    duration_sec:        float = 10.0,
+    verbose:             bool = True,
 ) -> None:
     """
     Main sensing loop.  All arguments default to mock/safe mode.
 
     Args:
-        use_real_distance  : Use serial_reader.SerialDistanceReader instead of mock.
-        use_real_vision    : Use vision.VisionReader instead of mock.
-        use_real_hardware  : Use audio.AudioOutput + haptics.HapticOutput instead of mock.
-        enable_logging     : Write events to CSV via logger.EventLogger.
-        duration_sec       : Seconds to run (0 = forever).
-        verbose            : Print per-tick trace to stdout.
+        use_real_distance   : Use serial_reader.SerialDistanceReader instead of mock.
+        use_camera_distance : Use camera bounding box height to estimate distance.
+        use_real_vision     : Use vision.VisionReader instead of mock.
+        use_real_hardware   : Use audio.AudioOutput + haptics.HapticOutput instead of mock.
+        enable_logging      : Write events to CSV via logger.EventLogger.
+        duration_sec        : Seconds to run (0 = forever).
+        verbose             : Print per-tick trace to stdout.
     """
-    distance_reader = _load_distance_reader(use_real_distance)
-    vision_reader   = _load_vision_reader(use_real_vision)
-    hw              = _load_hardware(use_real_hardware)
-    logger          = _load_logger(enable_logging)
+    vision_reader = _load_vision_reader(use_real_vision)
+
+    if use_camera_distance:
+        from distance_estimator import CameraDistanceEstimator
+        cam_dist_estimator = CameraDistanceEstimator()
+        distance_reader = None
+        print("[main] Using CAMERA BOUNDING-BOX DISTANCE ESTIMATOR (no physical ultrasonic needed)")
+    else:
+        cam_dist_estimator = None
+        distance_reader = _load_distance_reader(use_real_distance)
+
+    hw     = _load_hardware(use_real_hardware)
+    logger = _load_logger(enable_logging)
 
     engine = FusionEngine()
     sm     = StateMachine(hw=hw)
@@ -249,8 +260,13 @@ def run(
             if duration_sec > 0 and (now - start) >= duration_sec:
                 break
 
-            distance_m = distance_reader.read()
             detections = vision_reader.read()
+
+            if cam_dist_estimator is not None:
+                cam_dist_estimator.update_detections(detections)
+                distance_m = cam_dist_estimator.read()
+            else:
+                distance_m = distance_reader.read()
 
             frame = SensorFrame(
                 distance_m=distance_m,
@@ -260,6 +276,9 @@ def run(
 
             result = engine.process(frame)
             state  = sm.update(result)
+
+            if distance_reader is not None and hasattr(distance_reader, "send_state"):
+                distance_reader.send_state(state.name)
 
             if logger:
                 logger.log_event(frame, result, state)
@@ -295,19 +314,21 @@ def run(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GuideSense navigation aid")
-    parser.add_argument("--real",          action="store_true", help="Use all real hardware modules")
-    parser.add_argument("--real-distance", action="store_true", help="Use real serial distance reader only")
-    parser.add_argument("--real-vision",   action="store_true", help="Use real camera/detector only")
-    parser.add_argument("--no-log",        action="store_true", help="Disable CSV event logging")
-    parser.add_argument("--forever",       action="store_true", help="Run indefinitely (Ctrl-C to stop)")
-    parser.add_argument("--duration",      type=float, default=10.0, help="Run duration in seconds (default 10)")
+    parser.add_argument("--real",            action="store_true", help="Use all real hardware modules")
+    parser.add_argument("--camera-distance", action="store_true", help="Estimate distance using camera bounding boxes (no ultrasonic sensor)")
+    parser.add_argument("--real-distance",   action="store_true", help="Use real serial distance reader only")
+    parser.add_argument("--real-vision",     action="store_true", help="Use real camera/detector only")
+    parser.add_argument("--no-log",          action="store_true", help="Disable CSV event logging")
+    parser.add_argument("--forever",         action="store_true", help="Run indefinitely (Ctrl-C to stop)")
+    parser.add_argument("--duration",        type=float, default=10.0, help="Run duration in seconds (default 10)")
     args = parser.parse_args()
 
     run(
-        use_real_distance = args.real or args.real_distance,
-        use_real_vision   = args.real or args.real_vision,
-        use_real_hardware = args.real,
-        enable_logging    = not args.no_log,
-        duration_sec      = 0.0 if args.forever else args.duration,
-        verbose           = True,
+        use_real_distance   = args.real or args.real_distance,
+        use_camera_distance = args.camera_distance,
+        use_real_vision     = args.real or args.real_vision or args.camera_distance,
+        use_real_hardware   = args.real,
+        enable_logging      = not args.no_log,
+        duration_sec        = 0.0 if args.forever else args.duration,
+        verbose             = True,
     )

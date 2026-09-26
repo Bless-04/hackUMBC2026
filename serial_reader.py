@@ -85,9 +85,20 @@ class SerialDistanceReader:
         # Stub: return fallback until real hardware is wired
         return self._last
 
+    def send_state(self, state_name: str) -> None:
+        """
+        Sends the current SystemState to the Arduino to control Breadboard LEDs.
+        (Green = SILENT, Yellow = INFORMATIVE, Red = URGENT)
+        """
+        # CE freshman TODO:
+        #   if hasattr(self, "_ser") and self._ser and self._ser.is_open:
+        #       self._ser.write(f"STATE:{state_name}\n".encode("utf-8"))
+        pass
+
     def close(self) -> None:
         """Call on shutdown to release the serial port."""
-        # self._ser.close()
+        # if hasattr(self, "_ser") and self._ser:
+        #     self._ser.close()
         pass
 
 

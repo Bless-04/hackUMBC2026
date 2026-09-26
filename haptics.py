@@ -34,12 +34,12 @@ import time
 
 
 # ---------------------------------------------------------------------------
-# Configuration — agree on Option A or B with CE freshman
+# Configuration — choose output mode
 # ---------------------------------------------------------------------------
 
-USE_SERIAL_BUZZER = True       # True = Option A (serial), False = Option B (GPIO)
-BUZZER_SERIAL_PORT = "/dev/ttyUSB0"   # same port as serial_reader if Option A
-BUZZER_GPIO_PIN    = 18               # BCM pin number if Option B
+OUTPUT_MODE = "SPEAKER"        # "SPEAKER" (JBL audio tone), "SERIAL" (Arduino), or "GPIO"
+BUZZER_SERIAL_PORT = "/dev/ttyUSB0"   # for "SERIAL"
+BUZZER_GPIO_PIN    = 18               # for "GPIO"
 
 
 # ---------------------------------------------------------------------------
@@ -48,63 +48,65 @@ BUZZER_GPIO_PIN    = 18               # BCM pin number if Option B
 
 class HapticOutput:
     """
-    Controls the buzzer/vibrator.
-
-    buzzer_on()  — start continuous buzz
-    buzzer_off() — stop buzz
-    Both are idempotent (safe to call when already in that state).
+    Controls urgent alerting via JBL speaker audio tone, Arduino serial, or Pi GPIO.
+    buzzer_on()  — start continuous/pulsing urgent alert
+    buzzer_off() — stop alert
+    Both are idempotent.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, mode: str = OUTPUT_MODE) -> None:
+        self._mode = mode
         self._active = False
-        # Option A (serial) TODO:
-        #   import serial
-        #   self._ser = serial.Serial(BUZZER_SERIAL_PORT, 9600, timeout=0.05)
-        #
-        # Option B (GPIO) TODO:
-        #   import RPi.GPIO as GPIO
-        #   GPIO.setmode(GPIO.BCM)
-        #   GPIO.setup(BUZZER_GPIO_PIN, GPIO.OUT, initial=GPIO.LOW)
-        print("[HapticOutput] stub — buzzer not connected")
+        self._thread = None
+        self._stop_event = None
+
+        if self._mode == "SPEAKER":
+            import threading
+            self._stop_event = threading.Event()
+            print("[HapticOutput] JBL Speaker alarm tone mode active")
+        else:
+            print(f"[HapticOutput] stub — mode={self._mode} not connected")
+
+    def _speaker_alarm_loop(self) -> None:
+        """Looping urgency tone played through system audio / JBL speaker."""
+        import platform
+        is_windows = platform.system() == "Windows"
+        
+        while not self._stop_event.is_set():
+            if is_windows:
+                try:
+                    import winsound
+                    winsound.Beep(880, 200)  # 880 Hz beep for 200ms
+                except Exception:
+                    time.sleep(0.2)
+            else:
+                # Linux / Raspberry Pi: beep via terminal bell or audio system
+                import os
+                # Generates a quick beep or audio cue
+                os.system("(speaker-test -t sine -f 880 -l 1 > /dev/null 2>&1) &")
+                time.sleep(0.25)
+            time.sleep(0.05)
 
     def buzzer_on(self) -> None:
-        """
-        IT freshman TODO (Option A):
-            if not self._active:
-                self._ser.write(b"BUZZ_ON\n")
-                self._active = True
-
-        IT freshman TODO (Option B):
-            import RPi.GPIO as GPIO
-            if not self._active:
-                GPIO.output(BUZZER_GPIO_PIN, GPIO.HIGH)
-                self._active = True
-        """
         if not self._active:
-            print("[HapticOutput] stub buzzer_on")
             self._active = True
+            print("[HapticOutput] *** URGENT ALARM ON ***")
+            if self._mode == "SPEAKER":
+                import threading
+                self._stop_event.clear()
+                self._thread = threading.Thread(target=self._speaker_alarm_loop, daemon=True)
+                self._thread.start()
 
     def buzzer_off(self) -> None:
-        """
-        IT freshman TODO (Option A):
-            if self._active:
-                self._ser.write(b"BUZZ_OFF\n")
-                self._active = False
-
-        IT freshman TODO (Option B):
-            import RPi.GPIO as GPIO
-            if self._active:
-                GPIO.output(BUZZER_GPIO_PIN, GPIO.LOW)
-                self._active = False
-        """
         if self._active:
-            print("[HapticOutput] stub buzzer_off")
             self._active = False
+            print("[HapticOutput] --- URGENT ALARM OFF ---")
+            if self._mode == "SPEAKER" and self._stop_event:
+                self._stop_event.set()
 
     def cleanup(self) -> None:
-        """Release GPIO/serial on shutdown."""
+        """Release audio/GPIO/serial on shutdown."""
         self.buzzer_off()
-        # Option B: GPIO.cleanup()
 
 
 # ---------------------------------------------------------------------------
