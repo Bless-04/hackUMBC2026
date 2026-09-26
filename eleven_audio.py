@@ -30,7 +30,7 @@ import wave
 from typing import Callable, Optional
 
 # ElevenLabs configuration
-DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"  # George (pre-made voice, supports free & paid keys)
+DEFAULT_VOICE_ID = "XrExE9yKIg1WjnnlVkGX"  # Maltida
 MODEL_ID = "eleven_flash_v2_5"             # Fast, low-latency model
 OUTPUT_FORMAT = "pcm_24000"                # Raw PCM 24kHz, 16-bit mono
 
