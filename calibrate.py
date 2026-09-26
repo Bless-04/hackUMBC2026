@@ -63,16 +63,29 @@ def main():
     print(f"Target distance      : {args.distance:.1f} cm")
     print(f"Camera index         : {args.camera}")
     print("-" * 60)
-    print("Opening webcam...")
+    print(f"Opening webcam at index {args.camera}...")
 
     cap = cv2.VideoCapture(args.camera)
     if not cap.isOpened():
         print(f"[ERROR] Could not open webcam at index {args.camera}.")
+        if args.camera == 0:
+            print("[TIP] Try specifying index 1 if an external webcam is connected: python3 calibrate.py --camera 1")
         sys.exit(1)
 
     # Set resolution to 640x480
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+    # Allow auto-exposure / white-balance to settle
+    for _ in range(5):
+        cap.read()
+
+    # Diagnostic check for dark/black frame
+    ret, check_frame = cap.read()
+    if ret and check_frame is not None and check_frame.mean() < 15.0:
+        print(f"[WARNING] Camera {args.camera} is returning a very dark/black frame (brightness: {check_frame.mean():.1f}/255).")
+        print("          If your laptop has a built-in camera, your Logitech C270 is likely on camera index 1.")
+        print("          Run with: python3 calibrate.py --camera 1 --height {args.height} --distance {args.distance}\n")
 
     window_name = "GuideSense Calibration - Live Preview"
     cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)

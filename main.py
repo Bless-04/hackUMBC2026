@@ -169,12 +169,12 @@ def _load_distance_reader(use_real: bool):
     return MockDistanceReader()
 
 
-def _load_vision_reader(use_real: bool):
+def _load_vision_reader(use_real: bool, camera_index: int = 0):
     if use_real:
         try:
             from vision import VisionReader
-            reader = VisionReader()
-            print("[main] Using REAL VisionReader")
+            reader = VisionReader(camera_index=camera_index)
+            print(f"[main] Using REAL VisionReader (camera={camera_index})")
             return reader
         except Exception as e:
             print(f"[main] WARNING: VisionReader failed ({e}), falling back to mock")
@@ -214,6 +214,7 @@ def run(
     use_camera_distance: bool = False,
     use_real_vision:     bool = False,
     use_real_hardware:   bool = False,
+    camera_index:        int = 0,
     enable_gemini:       bool = False,
     enable_backboard:    bool = False,
     enable_logging:      bool = True,
@@ -228,13 +229,14 @@ def run(
         use_camera_distance : Use camera bounding box height to estimate distance.
         use_real_vision     : Use vision.VisionReader instead of mock.
         use_real_hardware   : Use audio.AudioOutput + haptics.HapticOutput instead of mock.
+        camera_index        : Webcam device index (default: 0, try 1 for external Logitech C270).
         enable_gemini       : Use Google Gemini for contextual scene audio descriptions.
         enable_backboard    : Use Backboard.io for persistent spatial & session memory.
         enable_logging      : Write events to CSV via logger.EventLogger.
         duration_sec        : Seconds to run (0 = forever).
         verbose             : Print per-tick trace to stdout.
     """
-    vision_reader = _load_vision_reader(use_real_vision)
+    vision_reader = _load_vision_reader(use_real_vision, camera_index=camera_index)
 
     if use_camera_distance:
         from distance_estimator import CameraDistanceEstimator
@@ -350,6 +352,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GuideSense navigation aid")
     parser.add_argument("--real",            action="store_true", help="Use all real hardware modules")
     parser.add_argument("--camera-distance", action="store_true", help="Estimate distance using camera bounding boxes (no ultrasonic sensor)")
+    parser.add_argument("--camera",          type=int, default=0, help="Webcam device index (default: 0, try 1 for external Logitech C270)")
     parser.add_argument("--gemini",          action="store_true", help="Enable Google Gemini multimodal contextual scene description")
     parser.add_argument("--backboard",       action="store_true", help="Enable Backboard.io persistent spatial navigation memory")
     parser.add_argument("--real-distance",   action="store_true", help="Use real serial distance reader only")
@@ -364,6 +367,7 @@ if __name__ == "__main__":
         use_camera_distance = args.camera_distance,
         use_real_vision     = args.real or args.real_vision or args.camera_distance,
         use_real_hardware   = args.real,
+        camera_index        = args.camera,
         enable_gemini       = args.gemini,
         enable_backboard    = args.backboard,
         enable_logging      = not args.no_log,
