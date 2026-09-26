@@ -122,56 +122,96 @@ Detection(
 
 ---
 
+## Hardware Testing & Subsystem Verification
+
+Before running full end-to-end integration, test each individual hardware subsystem independently:
+
+### 1. Camera Focal Length Calibration (`calibrate.py`)
+Calibrate your webcam to compute the exact `FOCAL_LENGTH_PX` constant for pinhole distance calculation:
+```bash
+# Calibrate using standing person at 2.0 m (default)
+python3 calibrate.py --height 170.0 --distance 200.0
+
+# Calibrate using a standard chair (85 cm) at 1.5 m (150 cm)
+python3 calibrate.py --height 85.0 --distance 150.0
+```
+* **Steps**: Press `SPACE` / `ENTER` to freeze the frame, drag a bounding box from top to bottom of the object, and press `ENTER`.
+* **Output**: Copy the calculated `FOCAL_LENGTH_PX` value into `distance.py`.
+
+---
+
+### 2. Camera-Only Distance Estimation (`distance.py` / `main.py`)
+Test bounding-box distance calculation without physical ultrasonic hardware:
+```bash
+# Run GuideSense using monocular camera distance estimation
+python3 main.py --camera-distance
+
+# Or run with live camera detection and camera distance
+python3 main.py --live --duration 20
+```
+
+---
+
+### 3. Vision Module Test (`vision.py`)
+Test camera capture and real-time object detector:
+```bash
+python3 vision.py
+```
+* **Expected Output**: Continuous stream of detections (`label`, `confidence`, `bbox`) at $\ge 10\text{ FPS}$.
+
+---
+
+### 4. Audio / TTS Subsystem Test (`audio.py`)
+Test non-blocking speech synthesis:
+```bash
+python3 audio.py
+```
+* **Expected Output**: Speaks `"person"`, `"chair"`, `"bicycle"` in order with audible pauses, without hanging the console.
+
+---
+
+### 5. Haptics / Buzzer Test (`haptics.py`)
+Test buzzer activation and cleanup:
+```bash
+python3 haptics.py
+```
+* **Expected Output**: Buzzer turns ON for 1.0 s, OFF for 1.0 s, and ON for 1.0 s before clean exit.
+
+---
+
+### 6. Ultrasonic Serial Distance Reader (`serial_reader.py`)
+Test Arduino/microcontroller USB serial distance streaming:
+```bash
+python3 serial_reader.py
+```
+* **Expected Output**: Live stream of distance readings in metres (e.g. `1.45m`, `0.52m`).
+
+---
+
+### 7. End-to-End Live Integration (`main.py`)
+
+Run the full system in your target hardware configuration:
+
+```bash
+# 1. Full Real Hardware (Serial distance + Camera Vision + Audio/Haptics)
+python3 main.py --real
+
+# 2. Camera-Only Distance Mode (No ultrasonic sensor needed)
+python3 main.py --camera-distance
+
+# 3. Partial Real Modes (for incremental testing)
+python3 main.py --real-distance   # Real ultrasonic + mock vision
+python3 main.py --real-vision     # Real camera vision + mock distance
+
+# 4. Generate Judge CSV Log Evidence
+python3 main.py --real --log
+```
+
+---
+
 ## Swapping in Real Hardware
 
-Everything is swappable in **`main.py`**. Find the three marked sections:
-
-### 1. Real Distance Reader (CE freshman's serial module)
-```python
-# In main.py — replace MockDistanceReader with:
-class SerialDistanceReader:
-    def read(self) -> float:
-        return ce_module.get_distance_metres()   # ← their function here
-```
-
-### 2. Real Vision Reader (IT freshman's detector)
-```python
-# In main.py — replace MockVisionReader with:
-class CameraVisionReader:
-    def read(self) -> list[Detection]:
-        raw = it_module.detect()
-        return [
-            Detection(label=r.label, confidence=r.conf, bbox=r.bbox)
-            for r in raw
-        ]
-```
-
-### 3. Real Hardware Output (TTS + GPIO buzzer)
-```python
-# In main.py — fill in RealHardwareInterface:
-class RealHardwareInterface(HardwareInterface):
-    def speak(self, text: str) -> None:
-        import pyttsx3
-        engine = pyttsx3.init()
-        engine.say(text)
-        engine.runAndWait()
-
-    def buzzer_on(self) -> None:
-        GPIO.output(BUZZER_PIN, GPIO.HIGH)
-
-    def buzzer_off(self) -> None:
-        GPIO.output(BUZZER_PIN, GPIO.LOW)
-```
-
-Then pass it into `run()`:
-```python
-run(
-    distance_reader=SerialDistanceReader(),
-    vision_reader=CameraVisionReader(),
-    hw=RealHardwareInterface(),
-    duration_sec=0,   # 0 = run forever
-)
-```
+Everything is modular and swappable in **`main.py`**:
 
 ---
 
