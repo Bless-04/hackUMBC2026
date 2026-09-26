@@ -63,6 +63,25 @@ def _model_path(value: str | Path) -> Path:
     return (Path(__file__).resolve().parent / path).resolve()
 
 
+def _ensure_model_files(config_path: Path, weights_path: Path) -> None:
+    """Download default MobileNet-SSD Caffe files if missing."""
+    import urllib.request
+    urls = {
+        config_path: "https://raw.githubusercontent.com/chuanqi305/MobileNet-SSD/master/voc/MobileNetSSD_deploy.prototxt",
+        weights_path: "https://raw.githubusercontent.com/djmv/MobilNet_SSD_opencv/master/MobileNetSSD_deploy.caffemodel",
+    }
+    for target, url in urls.items():
+        if not target.is_file():
+            print(f"[VisionReader] Downloading missing model file {target.name}...")
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=30) as resp, open(target, "wb") as f:
+                    f.write(resp.read())
+                print(f"[VisionReader] Downloaded {target.name} successfully.")
+            except Exception as exc:
+                print(f"[VisionReader] Warning: Auto-download of {target.name} failed ({exc}).")
+
+
 class VisionReader:
     """Capture webcam frames and turn MobileNet-SSD output into detections."""
 
@@ -91,6 +110,9 @@ class VisionReader:
         config_path = _model_path(model_config)
         weights_path = _model_path(model_weights)
         missing = [str(path) for path in (config_path, weights_path) if not path.is_file()]
+        if missing and (str(model_config) == MODEL_CONFIG or str(model_weights) == MODEL_WEIGHTS):
+            _ensure_model_files(config_path, weights_path)
+            missing = [str(path) for path in (config_path, weights_path) if not path.is_file()]
         if missing:
             raise FileNotFoundError(
                 "MobileNet-SSD model file(s) not found: " + ", ".join(missing)

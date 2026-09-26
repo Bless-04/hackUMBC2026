@@ -10,7 +10,7 @@ ruff>=0.4
 backboard-sdk>=1.5.0
 
 # --- Vision pipeline (IT freshman) ---
-opencv-python>=4.8
+opencv-python>=4.8,<5.0
 
 # --- Audio output (IT freshman) ---
 pyttsx3>=2.90

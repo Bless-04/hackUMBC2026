@@ -332,6 +332,8 @@ def run(
         # Always clean up hardware and flush log on exit/error
         if hasattr(hw, '_haptic') and hasattr(hw._haptic, 'cleanup'):
             hw._haptic.cleanup()
+        if hasattr(vision_reader, 'close'):
+            vision_reader.close()
         if logger:
             logger.close()
 
