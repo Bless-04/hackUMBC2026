@@ -46,11 +46,9 @@ from __future__ import annotations
 
 import argparse
 import time
-from typing import Optional
 
 from fusion import Detection, FusionEngine, SensorFrame
 from state_machine import HardwareInterface, StateMachine
-
 
 # ---------------------------------------------------------------------------
 # Tick rate

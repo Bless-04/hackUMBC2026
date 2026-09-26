@@ -7,8 +7,9 @@ Verifies that bounding box height ratios map correctly to NEAR, MID, and FAR zon
 from __future__ import annotations
 
 import pytest
-from fusion import Detection
+
 from distance_estimator import CameraDistanceEstimator
+from fusion import Detection
 
 
 @pytest.fixture
