@@ -1,153 +1,227 @@
 """
-vision.py — IT Freshman's Module
-==================================
-Camera capture + MobileNet-SSD object detection.
+Camera capture and MobileNet-SSD object detection.
 
-OWNED BY: Freshman #2 (Information Technology)
-HANDED OFF TO: Senior (CS) via the read() interface below.
-
-Data contract with senior:
-  vision.VisionReader().read() -> list[Detection]
-
-  Detection is imported from fusion.py — do NOT redefine it here.
-  Fields the senior reads:
-    detection.label       str    COCO class name, lowercase  e.g. "person", "chair"
-    detection.confidence  float  0.0–1.0
-    detection.bbox        tuple  (x1, y1, x2, y2) pixels in the raw camera frame
-    detection.timestamp   float  time.monotonic() at capture time
-
-Model recommendation (from manual Part 8):
-  MobileNet-SSD pretrained on COCO
-  Framework: OpenCV DNN  (cv2.dnn.readNetFromCaffe)
-  Files needed:
-    MobileNetSSD_deploy.prototxt
-    MobileNetSSD_deploy.caffemodel
-
-Benchmark procedure (manual Part 8):
-  1. Run benchmark.py (in this repo) to measure FPS before plugging into main loop
-  2. Target >= 10 FPS at 300x300 input resolution on Pi hardware
-  3. If below target: lower confidence_min in fusion.py or drop to 5 Hz tick rate
-
-How to test standalone (before handoff):
-  python -X utf8 vision.py
-  → opens camera, prints detections to stdout, Ctrl-C to stop
+``VisionReader`` owns the webcam and OpenCV DNN model. Its public contract is
+small on purpose: call :meth:`read` once per sensing tick and :meth:`close` at
+shutdown. A failed frame read is treated as a temporary sensor outage and
+returns an empty list rather than taking down the safety loop.
 """
 
 from __future__ import annotations
 
+import math
 import time
+from pathlib import Path
+from typing import Any
 
 from fusion import Detection
 
-# ---------------------------------------------------------------------------
-# Configuration — IT freshman adjusts these to match their setup
-# ---------------------------------------------------------------------------
+CAMERA_INDEX = 0
+INPUT_WIDTH = 300
+INPUT_HEIGHT = 300
+CONFIDENCE_FLOOR = 0.40
+MAX_DETECTIONS = 5
+MODEL_CONFIG = "MobileNetSSD_deploy.prototxt"
+MODEL_WEIGHTS = "MobileNetSSD_deploy.caffemodel"
 
-CAMERA_INDEX      = 0          # Pi camera index (usually 0)
-INPUT_WIDTH       = 300        # MobileNet-SSD native input size
-INPUT_HEIGHT      = 300
-CONFIDENCE_FLOOR  = 0.40       # pre-filter before sending to fusion (fusion has its own gate at 0.50)
-MAX_DETECTIONS    = 5          # cap detections per frame for performance
-
-# COCO classes MobileNet-SSD was trained on (index → label)
-# IT freshman: keep this list — fusion.py priority table uses these exact strings
+# The recommended Caffe MobileNet-SSD checkpoint was trained on the 20 PASCAL
+# VOC classes. The canonicalized spellings below match fusion.OBJECT_PRIORITY
+# (notably ``motorcycle`` and ``couch``).
 COCO_CLASSES = [
-    "background", "aeroplane", "bicycle", "bird", "boat", "bottle",
-    "bus", "car", "cat", "chair", "cow", "dining table", "dog",
-    "horse", "motorbike", "person", "pottedplant", "sheep", "sofa",
-    "train", "tvmonitor",
+    "background",
+    "airplane",
+    "bicycle",
+    "bird",
+    "boat",
+    "bottle",
+    "bus",
+    "car",
+    "cat",
+    "chair",
+    "cow",
+    "dining table",
+    "dog",
+    "horse",
+    "motorcycle",
+    "person",
+    "potted plant",
+    "sheep",
+    "couch",
+    "train",
+    "tv",
 ]
 
 
-# ---------------------------------------------------------------------------
-# Real implementation — IT freshman fills this in
-# ---------------------------------------------------------------------------
+def _model_path(value: str | Path) -> Path:
+    """Resolve default model files next to this module, independent of cwd."""
+    path = Path(value).expanduser()
+    if path.is_absolute() or path.exists():
+        return path.resolve()
+    return (Path(__file__).resolve().parent / path).resolve()
+
 
 class VisionReader:
-    """
-    Captures one camera frame and returns a list of Detections.
-
-    Usage:
-        reader = VisionReader()
-        detections = reader.read()   # call this every tick
-
-    The senior's main.py calls reader.read() at TICK_HZ (10 Hz).
-    Each call should return immediately with the latest available frame
-    (don't block waiting for a new frame if the camera is slow).
-    """
+    """Capture webcam frames and turn MobileNet-SSD output into detections."""
 
     def __init__(
         self,
         camera_index: int = CAMERA_INDEX,
         confidence_floor: float = CONFIDENCE_FLOOR,
+        *,
+        model_config: str | Path = MODEL_CONFIG,
+        model_weights: str | Path = MODEL_WEIGHTS,
+        max_detections: int = MAX_DETECTIONS,
     ) -> None:
-        # IT freshman: uncomment when model files and camera are ready
-        # import cv2
-        # self._cap = cv2.VideoCapture(camera_index)
-        # self._net = cv2.dnn.readNetFromCaffe(
-        #     "MobileNetSSD_deploy.prototxt",
-        #     "MobileNetSSD_deploy.caffemodel",
-        # )
-        self._confidence_floor = confidence_floor
-        print(f"[VisionReader] stub — camera={camera_index}  (not connected)")
+        if not 0.0 <= confidence_floor <= 1.0:
+            raise ValueError("confidence_floor must be between 0.0 and 1.0")
+        if max_detections < 1:
+            raise ValueError("max_detections must be at least 1")
+
+        try:
+            import cv2
+        except ImportError as exc:  # pragma: no cover - depends on host setup
+            raise RuntimeError(
+                "OpenCV is required for VisionReader; install opencv-python"
+            ) from exc
+
+        config_path = _model_path(model_config)
+        weights_path = _model_path(model_weights)
+        missing = [str(path) for path in (config_path, weights_path) if not path.is_file()]
+        if missing:
+            raise FileNotFoundError(
+                "MobileNet-SSD model file(s) not found: " + ", ".join(missing)
+            )
+
+        self._cv2: Any = cv2
+        self._confidence_floor = float(confidence_floor)
+        self._max_detections = max_detections
+        self._closed = False
+        self._warned_capture_failure = False
+
+        try:
+            self._net = cv2.dnn.readNetFromCaffe(str(config_path), str(weights_path))
+        except Exception as exc:
+            raise RuntimeError(f"Could not load MobileNet-SSD model: {exc}") from exc
+
+        self._cap = cv2.VideoCapture(camera_index)
+        if hasattr(self._cap, "isOpened") and not self._cap.isOpened():
+            self._cap.release()
+            raise RuntimeError(f"Could not open camera index {camera_index}")
+
+        print(
+            f"[VisionReader] camera={camera_index} model={weights_path.name} "
+            f"confidence>={self._confidence_floor:.2f}"
+        )
 
     def read(self) -> list[Detection]:
-        """
-        Return a list of Detection objects from the latest camera frame.
-        Returns [] if camera unavailable or no objects detected above threshold.
+        """Return detections for one frame, or ``[]`` if capture temporarily fails."""
+        if self._closed:
+            return []
 
-        IT freshman TODO:
-            ret, frame = self._cap.read()
-            if not ret:
-                return []
+        try:
+            ok, frame = self._cap.read()
+        except Exception as exc:  # camera drivers can fail transiently
+            self._warn_capture_failure(str(exc))
+            return []
 
-            blob = cv2.dnn.blobFromImage(
-                cv2.resize(frame, (INPUT_WIDTH, INPUT_HEIGHT)),
-                0.007843, (INPUT_WIDTH, INPUT_HEIGHT), 127.5,
+        if not ok or frame is None:
+            self._warn_capture_failure("no frame returned")
+            return []
+
+        self._warned_capture_failure = False
+        return self._detect(frame)
+
+    def _detect(self, frame: Any) -> list[Detection]:
+        """Run inference for a captured frame (kept separate for focused tests)."""
+        cv2 = self._cv2
+        height, width = frame.shape[:2]
+        resized = cv2.resize(frame, (INPUT_WIDTH, INPUT_HEIGHT))
+        blob = cv2.dnn.blobFromImage(
+            resized,
+            0.007843,
+            (INPUT_WIDTH, INPUT_HEIGHT),
+            127.5,
+        )
+        self._net.setInput(blob)
+        raw = self._net.forward()
+        captured_at = time.monotonic()
+        results: list[Detection] = []
+
+        if raw is None or len(raw.shape) < 3:
+            return results
+
+        for index in range(raw.shape[2]):
+            confidence = float(raw[0, 0, index, 2])
+            if not math.isfinite(confidence) or confidence < self._confidence_floor:
+                continue
+
+            class_index = int(raw[0, 0, index, 1])
+            if class_index <= 0 or class_index >= len(COCO_CLASSES):
+                continue
+
+            scaled = raw[0, 0, index, 3:7] * [width, height, width, height]
+            x1, y1, x2, y2 = (int(value) for value in scaled)
+            x1 = min(max(x1, 0), width - 1)
+            y1 = min(max(y1, 0), height - 1)
+            x2 = min(max(x2, 0), width - 1)
+            y2 = min(max(y2, 0), height - 1)
+            if x2 <= x1 or y2 <= y1:
+                continue
+
+            results.append(
+                Detection(
+                    label=COCO_CLASSES[class_index],
+                    confidence=confidence,
+                    bbox=(x1, y1, x2, y2),
+                    timestamp=captured_at,
+                )
             )
-            self._net.setInput(blob)
-            detections_raw = self._net.forward()
 
-            results = []
-            h, w = frame.shape[:2]
-            now = time.monotonic()
-            for i in range(detections_raw.shape[2]):
-                conf = float(detections_raw[0, 0, i, 2])
-                if conf < self._confidence_floor:
-                    continue
-                class_idx = int(detections_raw[0, 0, i, 1])
-                label = COCO_CLASSES[class_idx].lower()
-                box = detections_raw[0, 0, i, 3:7] * [w, h, w, h]
-                x1, y1, x2, y2 = box.astype(int)
-                results.append(Detection(label=label, confidence=conf, bbox=(x1,y1,x2,y2), timestamp=now))
+        # The DNN output order is not a documented ranking. Keeping the most
+        # confident results makes MAX_DETECTIONS deterministic and useful.
+        results.sort(key=lambda detection: detection.confidence, reverse=True)
+        return results[: self._max_detections]
 
-            return results[:MAX_DETECTIONS]
-        """
-        # Stub: return empty list until camera + model are wired
-        return []
+    def _warn_capture_failure(self, detail: str) -> None:
+        if not self._warned_capture_failure:
+            print(f"[VisionReader] camera frame unavailable: {detail}")
+            self._warned_capture_failure = True
 
     def close(self) -> None:
-        """Release camera on shutdown."""
-        # self._cap.release()
-        pass
+        """Release the camera. Safe to call more than once."""
+        if self._closed:
+            return
+        self._closed = True
+        self._cap.release()
 
+    def __enter__(self) -> "VisionReader":
+        return self
 
-# ---------------------------------------------------------------------------
-# Standalone test
-# ---------------------------------------------------------------------------
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
 
 if __name__ == "__main__":
     reader = VisionReader()
-    print("Running detection. Ctrl-C to stop.")
+    print("Running detection benchmark. Ctrl-C to stop.")
+    frame_count = 0
+    benchmark_start = time.monotonic()
     try:
         while True:
-            dets = reader.read()
-            if dets:
-                for d in dets:
-                    print(f"  {d.label:<15} conf={d.confidence:.2f}  bbox={d.bbox}")
-            else:
-                print("  (no detections)")
-            time.sleep(0.1)
+            detections = reader.read()
+            frame_count += 1
+            for detection in detections:
+                print(
+                    f"  {detection.label:<15} conf={detection.confidence:.2f} "
+                    f"bbox={detection.bbox}"
+                )
+
+            elapsed = time.monotonic() - benchmark_start
+            if elapsed >= 1.0:
+                print(f"  FPS={frame_count / elapsed:.1f} (target >= 10)")
+                frame_count = 0
+                benchmark_start = time.monotonic()
     except KeyboardInterrupt:
-        reader.close()
         print("Done.")
+    finally:
+        reader.close()
