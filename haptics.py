@@ -112,7 +112,7 @@ class HapticOutput:
             if platform.system() == "Windows":
                 try:
                     import winsound
-
+                    # todo Change beep sound cus its annoying
                     winsound.Beep(TONE_HZ, int(TONE_DURATION_SEC * 1000))
                 except (ImportError, RuntimeError):
                     stop_event.wait(TONE_DURATION_SEC)
