@@ -214,7 +214,7 @@ class FusionEngine:
     def _compute_zone(self, distance_m: float) -> Zone:
         if distance_m < self.near_threshold_m:
             return Zone.NEAR
-        if distance_m < self.mid_threshold_m:
+        if distance_m <= self.mid_threshold_m:
             return Zone.MID
         return Zone.FAR
 
@@ -262,9 +262,10 @@ class FusionEngine:
                 continue
 
             # Cooldown gate: not announced recently
-            last = self._last_announced.get(label, 0.0)
-            if (now - last) < self.cooldown_sec:
-                continue
+            if label in self._last_announced:
+                last = self._last_announced[label]
+                if (now - last) < self.cooldown_sec:
+                    continue
 
             candidates.append(det)
 
