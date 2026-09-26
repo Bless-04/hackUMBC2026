@@ -36,9 +36,10 @@ FLUSH_EVERY_N   = 10    # flush to disk every N rows (balance between safety and
 CSV_HEADERS = [
     "timestamp_s",
     "distance_m",
-    "detections",          # "person(0.85),chair(0.72)" or ""
+    "detections",          # "person(0.85,LEFT),chair(0.72,CENTER)"
     "fusion_action",       # SILENT / INFORMATIVE / URGENT
     "announced_label",     # label if INFORMATIVE, else ""
+    "direction",           # LEFT / CENTER / RIGHT if available, else ""
     "system_state",        # SILENT / INFORMATIVE / APPROACHING / URGENT
     "reason",              # fusion engine's human-readable reason string
 ]
@@ -84,9 +85,13 @@ class EventLogger:
         """
         elapsed = frame.timestamp - self._start if self._start else frame.timestamp
 
-        det_str = ",".join(
-            f"{d.label}({d.confidence:.2f})" for d in frame.detections
-        )
+        det_parts = []
+        for d in frame.detections:
+            dir_str = f",{d.direction.name}" if d.direction else ""
+            det_parts.append(f"{d.label}({d.confidence:.2f}{dir_str})")
+        det_str = ",".join(det_parts)
+
+        dir_name = result.direction.name if result.direction else ""
 
         self._writer.writerow([
             f"{elapsed:.3f}",
@@ -94,6 +99,7 @@ class EventLogger:
             det_str,
             result.action.name,
             result.label or "",
+            dir_name,
             state.name,
             result.reason,
         ])

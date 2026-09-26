@@ -163,7 +163,7 @@ class VisionReader:
                         x1, y1 = max(0, x1), max(0, y1)
                         x2, y2 = min(w, x2), min(h, y2)
                         if (y2 - y1) > 10 and (x2 - x1) > 10:
-                            detections.append(Detection(label=label, confidence=conf, bbox=(x1, y1, x2, y2), timestamp=now))
+                            detections.append(Detection(label=label, confidence=conf, bbox=(x1, y1, x2, y2), timestamp=now, frame_width=w))
             except Exception as e:
                 print(f"[VisionReader] DNN Detection error: {e}")
 
@@ -187,6 +187,7 @@ class VisionReader:
                             confidence=round(norm_conf, 2),
                             bbox=(int(x), int(y), int(x + bw), int(y + bh)),
                             timestamp=now,
+                            frame_width=w,
                         ))
             except Exception as e:
                 print(f"[VisionReader] HOG inference error: {e}")
@@ -207,6 +208,7 @@ class VisionReader:
                         confidence=0.75,
                         bbox=(px1, py1, px2, py2),
                         timestamp=now,
+                        frame_width=w,
                     ))
             except Exception:
                 pass
@@ -217,14 +219,15 @@ class VisionReader:
         return detections[:MAX_DETECTIONS]
 
     def _render_preview(self, detections: list[Detection]) -> None:
-        """Renders live camera view with bounding box overlays and labels."""
+        """Renders live camera view with bounding box overlays, direction, and labels."""
         cv2 = self._cv2
         disp = self._latest_frame.copy()
 
         for d in detections:
             x1, y1, x2, y2 = d.bbox
             cv2.rectangle(disp, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            label_text = f"{d.label} ({d.confidence:.2f})"
+            dir_str = f" [{d.direction.name}]" if d.direction else ""
+            label_text = f"{d.label}{dir_str} ({d.confidence:.2f})"
             cv2.putText(disp, label_text, (x1, max(20, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
         cv2.imshow("GuideSense — Vision Preview", disp)
