@@ -172,5 +172,5 @@ def test_logger_appends_without_repeating_header(tmp_path):
 
     assert rows[0] == CSV_HEADERS
     assert len(rows) == 3
-    assert rows[1][2] == "person(0.85)"
-    assert rows[2][2] == "chair(0.85)"
+    assert rows[1][2] == "person(0.85,LEFT)"
+    assert rows[2][2] == "chair(0.85,LEFT)"

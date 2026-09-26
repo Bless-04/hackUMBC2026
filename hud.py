@@ -37,16 +37,12 @@ from distance import estimate_distance_m, get_real_height_cm
 from fusion import (
     MID_THRESHOLD_M,
     NEAR_THRESHOLD_M,
-    Detection,
-    Direction,
-    FusionAction,
     FusionResult,
     SensorFrame,
     Zone,
     compute_direction,
 )
 from state_machine import SystemState
-
 
 # ---------------------------------------------------------------------------
 # Color Palette (BGR for OpenCV)
@@ -227,11 +223,10 @@ class GuideSenseHUD:
         cv2.putText(disp, fps_text, (int(12 * scale), int(28 * scale)), font, 0.55 * scale, COLOR_WHITE, 1, cv2.LINE_AA)
 
         # Center: System State Badge
-        state_name = state.name
         if state == SystemState.URGENT:
             state_bg = COLOR_URGENT
             state_text_color = COLOR_WHITE
-            state_label = f" STATE: URGENT (HAZARD NEAR) "
+            state_label = " STATE: URGENT (HAZARD NEAR) "
         elif state == SystemState.INFORMATIVE:
             state_bg = COLOR_AMBER
             state_text_color = COLOR_BLACK

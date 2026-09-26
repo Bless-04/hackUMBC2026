@@ -1,7 +1,7 @@
 """
-Camera capture and MobileNet-SSD / HOG object detection.
+Camera capture and MobileNet-SSD object detection.
 
-``VisionReader`` owns the webcam and object detection models. Its public contract is
+``VisionReader`` owns the webcam and OpenCV DNN model. Its public contract is
 small on purpose: call :meth:`read` once per sensing tick and :meth:`close` at
 shutdown. A failed frame read is treated as a temporary sensor outage and
 returns an empty list rather than taking down the safety loop.
@@ -171,96 +171,48 @@ class VisionReader:
         """Run inference for a captured frame (kept separate for focused tests)."""
         cv2 = self._cv2
         height, width = frame.shape[:2]
+        resized = cv2.resize(frame, (INPUT_WIDTH, INPUT_HEIGHT))
+        blob = cv2.dnn.blobFromImage(
+            resized,
+            0.007843,
+            (INPUT_WIDTH, INPUT_HEIGHT),
+            127.5,
+        )
+        self._net.setInput(blob)
+        raw = self._net.forward()
         captured_at = time.monotonic()
         results: list[Detection] = []
 
-        # Path A: MobileNet-SSD Caffe DNN
-        if self._net is not None:
-            resized = cv2.resize(frame, (INPUT_WIDTH, INPUT_HEIGHT))
-            blob = cv2.dnn.blobFromImage(
-                resized,
-                0.007843,
-                (INPUT_WIDTH, INPUT_HEIGHT),
-                127.5,
-            )
-            self._net.setInput(blob)
-            raw = self._net.forward()
+        if raw is None or len(raw.shape) < 3:
+            return results
 
-            if raw is not None and len(raw.shape) >= 3:
-                for index in range(raw.shape[2]):
-                    confidence = float(raw[0, 0, index, 2])
-                    if not math.isfinite(confidence) or confidence < self._confidence_floor:
-                        continue
+        for index in range(raw.shape[2]):
+            confidence = float(raw[0, 0, index, 2])
+            if not math.isfinite(confidence) or confidence < self._confidence_floor:
+                continue
 
-                    class_index = int(raw[0, 0, index, 1])
-                    if class_index <= 0 or class_index >= len(MODEL_CLASSES):
-                        continue
+            class_index = int(raw[0, 0, index, 1])
+            if class_index <= 0 or class_index >= len(MODEL_CLASSES):
+                continue
 
-                    scaled = raw[0, 0, index, 3:7] * [width, height, width, height]
-                    x1, y1, x2, y2 = (int(value) for value in scaled)
-                    x1 = min(max(x1, 0), width - 1)
-                    y1 = min(max(y1, 0), height - 1)
-                    x2 = min(max(x2, 0), width - 1)
-                    y2 = min(max(y2, 0), height - 1)
-                    if x2 <= x1 or y2 <= y1:
-                        continue
+            scaled = raw[0, 0, index, 3:7] * [width, height, width, height]
+            x1, y1, x2, y2 = (int(value) for value in scaled)
+            x1 = min(max(x1, 0), width - 1)
+            y1 = min(max(y1, 0), height - 1)
+            x2 = min(max(x2, 0), width - 1)
+            y2 = min(max(y2, 0), height - 1)
+            if x2 <= x1 or y2 <= y1:
+                continue
 
-                    results.append(
-                        Detection(
-                            label=MODEL_CLASSES[class_index],
-                            confidence=confidence,
-                            bbox=(x1, y1, x2, y2),
-                            timestamp=captured_at,
-                            frame_width=width,
-                        )
-                    )
-
-        # Path B: Built-In OpenCV HOG Person Detector Fallback
-        elif self._hog is not None:
-            try:
-                boxes, weights = self._hog.detectMultiScale(
-                    frame,
-                    winStride=(8, 8),
-                    padding=(4, 4),
-                    scale=1.05,
+            results.append(
+                Detection(
+                    label=MODEL_CLASSES[class_index],
+                    confidence=confidence,
+                    bbox=(x1, y1, x2, y2),
+                    timestamp=captured_at,
+                    frame_width=width,
                 )
-                for (x, y, bw, bh), conf in zip(boxes, weights):
-                    conf_float = float(conf)
-                    norm_conf = min(0.95, max(0.50, 0.50 + conf_float * 0.2))
-                    if norm_conf >= self._confidence_floor:
-                        results.append(
-                            Detection(
-                                label="person",
-                                confidence=round(norm_conf, 2),
-                                bbox=(int(x), int(y), int(x + bw), int(y + bh)),
-                                timestamp=captured_at,
-                                frame_width=width,
-                            )
-                        )
-            except Exception as exc:
-                print(f"[VisionReader] HOG inference error: {exc}")
-
-            # Path C: Fallback to Face Cascade
-            if not results and self._face_cascade is not None:
-                try:
-                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                    faces = self._face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
-                    for (fx, fy, fw, fh) in faces:
-                        px1 = max(0, fx - int(fw * 0.5))
-                        py1 = max(0, fy - int(fh * 0.2))
-                        px2 = min(width, fx + int(fw * 1.5))
-                        py2 = min(height, fy + int(fh * 5.0))
-                        results.append(
-                            Detection(
-                                label="person",
-                                confidence=0.75,
-                                bbox=(px1, py1, px2, py2),
-                                timestamp=captured_at,
-                                frame_width=width,
-                            )
-                        )
-                except Exception:
-                    pass
+            )
 
         results.sort(key=lambda detection: detection.confidence, reverse=True)
         return results[: self._max_detections]
