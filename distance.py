@@ -1,4 +1,4 @@
-g"""
+"""
 distance.py — GuideSense Camera-Only Distance Estimation
 =========================================================
 Estimates physical distance to detected objects using single-camera bounding box geometry
@@ -14,9 +14,7 @@ providing a drop-in distance value (metres) for the SensorFrame consumed by Fusi
 
 from __future__ import annotations
 
-from typing import Optional
-from fusion import Detection, NEAR_THRESHOLD_M
-
+from fusion import NEAR_THRESHOLD_M, Detection
 
 # ---------------------------------------------------------------------------
 # Calibrated Constants & Thresholds

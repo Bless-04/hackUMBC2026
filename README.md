@@ -1,110 +1,209 @@
-# GuideSense — Decision Core
+# GuideSense — Decision Core & Integration Manual
 
-> **Chest-worn navigation aid for low-vision users.**
-> This module is the decision-making layer that fuses ultrasonic distance and camera detections into real-time audio/haptic alerts.
-
----
-
-## What This Module Does
-
-Raw sensor data on its own means nothing — a camera sees a chair, a sonar ping returns 1.5 m. Something has to decide whether the user should hear about it, and when. That's this layer.
-
-Every tick (~10×/sec) it answers one question:
-
-| Situation | Output |
-|---|---|
-| Nothing relevant nearby | Stay silent |
-| New object confirmed at mid-range | Speak its name once, then go quiet |
-| Anything within ~60 cm | Buzz continuously until it clears |
+> **Chest-worn assistive navigation device for low-vision users.**  
+> Fuses computer vision and proximity data to deliver real-time audio and haptic guidance: staying silent when clear, speaking calm contextual announcements once, and alerting urgently when hazards are near.
 
 ---
 
-## File Structure
+## 1. System Architecture & Hardware Setup
+
+### Physical Hardware Inventory
+- **Compute:** Raspberry Pi (runs main loop, fusion engine, state machine, and computer vision)
+- **Vision & Depth:** Logitech Webcam (USB)
+- **Audio & Alerts:** JBL Speaker (connected via 3.5mm AUX, USB, or Bluetooth)
+- **Hardware Indicators:** Arduino Uno/Nano + Breadboard + Status LEDs (Green, Yellow, Red) + optional Potentiometer
+- **Wearable:** Chest harness mounting the Pi, camera, breadboard, and speaker
+
+### The Ultrasonic Pivot (Monocular Bounding-Box Distance Estimation)
+Because a dedicated physical ultrasonic sensor was unavailable, the Logitech webcam provides **both** object recognition and metric distance estimation:
+1. `vision.py` detects objects and returns bounding boxes `(x1, y1, x2, y2)`.
+2. `distance_estimator.py` calculates object proximity using the vertical height ratio of the bounding box relative to the camera frame:
+   - **Height > 65% of frame:** Object is dangerously close $\rightarrow$ **$< 0.60\,\text{m}$ (NEAR / URGENT)**
+   - **Height 20% to 65% of frame:** Object is in walking path $\rightarrow$ **$0.60\,\text{m} - 2.00\,\text{m}$ (MID / INFORMATIVE)**
+   - **Height < 20% of frame:** Object is far away $\rightarrow$ **$> 2.00\,\text{m}$ (FAR / SILENT)**
+3. If an Arduino with a potentiometer is wired on the breadboard, it can also broadcast `D:<cm>\n` over USB serial to provide manual distance override for live demonstrations.
 
 ```
-hackUMBC2026/
-├── fusion.py          # Core rule engine — distance zones, persistence gate, cooldown
-├── state_machine.py   # Hardware output controller — TTS, buzzer, hysteresis
-├── main.py            # Integration loop — mock readers + swap-in points for real hardware
-└── test_scenarios.py  # 15 tests covering all 9 brief scenarios
+                  ┌────────────────────────────────────────────────────────┐
+                  │                    LOGITECH WEBCAM                     │
+                  └───────────┬────────────────────────────────┬───────────┘
+                              │                                │
+                     Raw Video Frames                  Bounding Box Height
+                              │                                │
+                              ▼                                ▼
+                  ┌───────────────────────┐        ┌───────────────────────┐
+                  │       vision.py       │        │ distance_estimator.py │
+                  │  (MobileNet-SSD COCO) │        │ (or serial_reader.py) │
+                  └───────────┬───────────┘        └───────────┬───────────┘
+                              │                                │
+                     list[Detection]                      distance_m
+                              │                                │
+                              └───────────────┬────────────────┘
+                                              │
+                                              ▼
+                                 ┌─────────────────────────┐
+                                 │        fusion.py        │
+                                 │   (Zone & Gate Rules)   │
+                                 └────────────┬────────────┘
+                                              │ FusionResult
+                                              ▼
+                                 ┌─────────────────────────┐
+                                 │    state_machine.py     │
+                                 │ (Hysteresis & Outputs)  │
+                                 └────────────┬────────────┘
+                                              │
+                        ┌─────────────────────┼─────────────────────┐
+                        ▼                     ▼                     ▼
+             ┌─────────────────────┐┌───────────────────┐┌─────────────────────┐
+             │      audio.py       ││    haptics.py     ││  serial_reader.py   │
+             │     JBL Speaker     ││    JBL Speaker    ││ Arduino Breadboard  │
+             │ (TTS Announcements) ││ (880Hz Siren Tone)││   (Status LEDs)     │
+             └─────────────────────┘└───────────────────┘└─────────────────────┘
 ```
 
 ---
 
-## Quick Start
+## 2. Team Track Split & Responsibilities
 
-**Requirements:** Python 3.10+, no external packages needed for mock mode.
-
-```bash
-# Run the simulated demo (person walks toward device, then away)
-python -X utf8 main.py
-
-# Run all tests
-python -X utf8 test_scenarios.py
-```
-
-> **Windows note:** Always use the `-X utf8` flag to avoid cp1252 encoding errors in the console output.
-
-The mock demo runs for 10 seconds and prints a live trace:
-
-```
-t= 0.00s  dist=4.00m  dets=[—]             fusion=SILENT       state=SILENT
-t= 3.01s  dist=3.98m  dets=[person(0.85)]  fusion=SILENT       state=SILENT   ← persistence warming
-t= 4.72s  dist=1.59m  dets=[person(0.85)]  fusion=INFORMATIVE  state=INFORMATIVE
-[TTS]     'person'
-t= 5.82s  dist=0.54m  dets=[person(0.85)]  fusion=URGENT       state=URGENT
-[BUZZER]  *** ON ***
-t= 7.60s  dist=2.92m  dets=[person(0.85)]  fusion=SILENT       state=SILENT
-[BUZZER]  --- off ---
-```
+| Role | Teammate | Modules Owned | Primary Responsibilities |
+|---|---|---|---|
+| **CS Senior** | Integration Lead | `fusion.py`, `state_machine.py`, `distance_estimator.py`, `main.py`, `tests/` | Decision core logic, priority ranking, persistence & cooldown gates, state transitions, hardware abstraction, CI/CD, mock integration. |
+| **CE Freshman** | Hardware & Sensors | `arduino_guidesense/arduino_guidesense.ino`, `serial_reader.py` | Flash Arduino sketch, wire breadboard status LEDs (Green/Yellow/Red) and optional potentiometer dial, physical chest harness assembly. |
+| **IT Freshman** | Vision, Audio, Logging | `vision.py`, `audio.py`, `haptics.py`, `logger.py` | Logitech webcam frame capture & MobileNet-SSD detection, pyttsx3 voice on JBL speaker, urgent audio alert loop on JBL speaker, CSV session logging. |
 
 ---
 
-## How the Logic Works
+## 3. Data Contracts & Interfaces (Critical for Integration)
 
-### 1. Distance Zones (checked first, always)
+Each module is strictly decoupled. Teammates must adhere to these exact function signatures:
 
-| Zone | Range | Behaviour |
-|---|---|---|
-| **NEAR** | < 0.60 m | → **URGENT** immediately, no camera needed |
-| **MID** | 0.60 m – 2.00 m | → Announce if object confirmed (see gates below) |
-| **FAR** | > 2.00 m | → **SILENT** always |
-
-### 2. The Three Gates (MID zone only)
-
-An object in MID zone must clear **all three** before an announcement fires:
-
-```
-[confidence ≥ 50%] → [present for 3 consecutive ticks] → [not announced in last 12 s] → SPEAK
-```
-
-- **Confidence gate** — ignore weak detections (< 0.50).
-- **Persistence gate** — kills single-frame flicker. One missed tick resets the streak.
-- **Cooldown gate** — once announced, that label is silenced for 12 seconds.
-
-### 3. Multi-Object Priority
-
-If multiple objects clear the gates simultaneously, only the **highest-priority** one is announced. Priority order (highest → lowest):
-
-```
-person > bicycle/motorcycle > car > dog > chair > table/couch > bed/toilet > anything else
-```
-
-### 4. URGENT Fast Path
-
-The NEAR-zone URGENT rule is **completely separate** from the persistence gate. A person stepping in front at 40 cm triggers the buzzer on the very first tick — no waiting for 3-frame confirmation.
-
-### 5. Buzzer Hysteresis
-
-When distance clears back above 0.60 m, the buzzer stays on for **1.5 seconds** before shutting off. This prevents flickering at the boundary if the user is hovering right at the threshold.
-
----
-
-## Data Contract (Agree with Hardware Teams First)
-
-This module expects two inputs per tick:
-
+### 1. Vision Module (`vision.py`)
 ```python
+from fusion import Detection
+
+class VisionReader:
+    def __init__(self, camera_index: int = 0, confidence_floor: float = 0.40): ...
+    def read(self) -> list[Detection]: ...
+    def close(self) -> None: ...
+```
+- **`Detection` structure:**
+  - `label: str` — Lowercase COCO class name (e.g. `"person"`, `"chair"`). Must match `OBJECT_PRIORITY` keys in `fusion.py`.
+  - `confidence: float` — Detection confidence between `0.0` and `1.0`.
+  - `bbox: tuple[int, int, int, int]` — Pixel coordinates `(x1, y1, x2, y2)`.
+  - `timestamp: float` — `time.monotonic()` seconds.
+
+### 2. Distance Estimation & Serial Reader (`distance_estimator.py` / `serial_reader.py`)
+```python
+class CameraDistanceEstimator:
+    def update_detections(self, detections: list[Detection]) -> None: ...
+    def read(self) -> float: ...  # Returns distance in METRES (e.g. 1.45)
+
+class SerialDistanceReader:
+    def read(self) -> float: ...  # Returns distance in METRES from Arduino "D:<cm>\n"
+    def send_state(self, state_name: str) -> None: ...  # Sends "STATE:<SILENT|INFORMATIVE|URGENT>\n" to Arduino
+    def close(self) -> None: ...
+```
+
+### 3. Voice Output (`audio.py`)
+```python
+class AudioOutput:
+    def speak(self, text: str) -> None: ...
+```
+- Must be **non-blocking** (run via a daemon thread or quick async task) so it never halts the 10 Hz sensing loop.
+- Emits voice through the connected JBL speaker.
+
+### 4. Urgent Alert / Haptics (`haptics.py`)
+```python
+class HapticOutput:
+    def buzzer_on(self) -> None: ...
+    def buzzer_off(self) -> None: ...
+    def cleanup(self) -> None: ...
+```
+- Plays a continuous 880 Hz urgent siren through the JBL speaker while active.
+- Both methods are **idempotent** (safe to call multiple times without side effects).
+
+### 5. Event Logger (`logger.py`)
+```python
+class EventLogger:
+    def log_event(self, frame: SensorFrame, result: FusionResult, state: SystemState) -> None: ...
+    def close(self) -> None: ...
+```
+- Appends CSV records to `guidesense_log.csv` every tick for post-run analysis and demo verification.
+
+---
+
+## 4. Arduino Breadboard Controller (`arduino_guidesense.ino`)
+
+The CE freshman flashes the sketch located in `arduino_guidesense/arduino_guidesense.ino`:
+
+### Breadboard Wiring
+| Arduino Pin | Component | Purpose |
+|---|---|---|
+| **Pin 2** | Green LED (with 220Ω resistor to GND) | Lights when system state is `SILENT` (clear path) |
+| **Pin 3** | Yellow LED (with 220Ω resistor to GND) | Lights when system state is `INFORMATIVE` (mid-range object) |
+| **Pin 4** | Red LED (with 220Ω resistor to GND) | Lights when system state is `URGENT` (proximity hazard) |
+| **Pin A0** | Potentiometer center wiper pin | Optional: manual distance dial (sends `D:<cm>\n` over serial) |
+| **5V / GND** | Breadboard power rails | Power rails for LEDs and potentiometer |
+
+---
+
+## 5. Core Decision Logic (`fusion.py` & `state_machine.py`)
+
+Every tick (10 Hz), the decision engine executes the following ordered rules:
+
+1. **Distance Zone Evaluation (Always Checked First):**
+   - $\text{distance} < 0.60\,\text{m} \rightarrow$ **NEAR Zone**
+   - $0.60\,\text{m} \le \text{distance} \le 2.00\,\text{m} \rightarrow$ **MID Zone**
+   - $\text{distance} > 2.00\,\text{m} \rightarrow$ **FAR Zone**
+
+2. **Near Zone Always Wins (URGENT Fast Path):**
+   - If distance is in the NEAR zone, the result is unconditionally **URGENT**.
+   - **Never gated by camera vision or persistence.** If someone suddenly steps 40 cm in front of the user, the alarm triggers on tick 1.
+
+3. **Mid-Range Filtering (Triple-Gate Pipeline):**
+   To announce an object in the MID zone, it must clear all three gates:
+   - **Confidence Gate:** Detection confidence $\ge 0.50$.
+   - **Persistence Gate:** Label must appear for **3 consecutive ticks** (kills single-frame detection flicker).
+   - **Cooldown Gate:** The same label cannot be announced again within **12.0 seconds** (the system speaks the name *once*, not repeatedly).
+
+4. **Multi-Object Priority Tie-Breaking:**
+   If multiple objects clear the gates simultaneously, only the single highest-priority object is announced:
+   $$\text{person} > \text{bicycle/motorcycle} > \text{car} > \text{dog} > \text{chair} > \text{table/couch} > \text{other}$$
+
+5. **Buzzer Hysteresis Window (`state_machine.py`):**
+   - When distance clears out of the NEAR zone, the urgent alarm stays active for **1.5 seconds** before silencing. This prevents chattering/flickering at the 60 cm boundary.
+
+---
+
+## 6. Running GuideSense
+
+GuideSense uses [`uv`](https://docs.astral.sh/uv/) for Python packaging and virtual environments.
+
+### Install & Synchronize
+```bash
+# Clone the repository
+git clone https://github.com/your-org/hackUMBC2026.git
+cd hackUMBC2026
+
+# Install development environment and dependencies
+uv sync --dev
+```
+
+### Operational Modes
+
+#### 1. Simulated / Mock Mode (Runs immediately without any hardware)
+```bash
+uv run python -X utf8 main.py
+```
+*Simulates a person approaching from 4.0m to 0.4m, testing the full SILENT $\rightarrow$ INFORMATIVE $\rightarrow$ URGENT $\rightarrow$ SILENT pipeline.*
+
+#### 2. Webcam Distance Mode (Logitech Webcam Connected, No Ultrasonic Sensor)
+```bash
+uv run python -X utf8 main.py --camera-distance
+```
+*Uses the Logitech webcam for both object detection and monocular distance estimation.*
+
+#### 3. Full Real Hardware Mode (Arduino Breadboard + Webcam + JBL Speaker)
 # From the CE freshman's ultrasonic serial reader:
 distance_m: float          # metres, e.g. 1.47
 
@@ -234,51 +333,62 @@ All thresholds live at the top of `fusion.py` and `state_machine.py` — no hunt
 ## Test Coverage
 
 ```bash
-python -X utf8 test_scenarios.py -v
+uv run python -X utf8 main.py --real
 ```
 
-All 15 tests pass, covering the 9 required scenarios:
+#### 4. Additional CLI Options
+```bash
+uv run python -X utf8 main.py --camera-distance --forever   # Run continuously until Ctrl+C
+uv run python -X utf8 main.py --real-distance              # Only real serial reader, mock vision
+uv run python -X utf8 main.py --real-vision                # Only real camera, mock distance
+uv run python -X utf8 main.py --no-log                     # Disable CSV session logging
+uv run python -X utf8 main.py --duration 30                # Run for 30 seconds
+```
 
-| # | Scenario | Test |
+> **Note for Windows:** Always include `-X utf8` to ensure UTF-8 console output.
+
+---
+
+## 7. Testing & Verification
+
+GuideSense includes 46 unit tests covering all 9 project brief scenarios, zone boundaries, hysteresis, and distance estimation:
+
+```bash
+# Run all tests
+uv run pytest
+
+# Run only the 9 required competition scenarios
+uv run pytest -m scenario
+
+# Run regression & boundary guard tests
+uv run pytest -m regression
+
+# Run with test coverage report
+uv run pytest --cov=fusion --cov=state_machine --cov=distance_estimator
+```
+
+### Scenario Test Coverage Matrix
+| Scenario | Description | Test Function |
 |---|---|---|
-| 1 | Person at 2 m → speak once | `test_person_at_2m_speaks_once` |
-| 2 | Chair at 1.5 m → speak once, silent after | `test_chair_at_1p5m_speaks_once` |
-| 3 | Object at 50 cm → URGENT regardless | `test_urgent_*` (3 subtests) |
-| 4 | Close distance, no camera → still URGENT | `test_near_no_vision` |
-| 5 | Camera sees something far → stay silent | `test_far_with_detection_is_silent` |
-| 6 | Detection flickers frame to frame → suppressed | `test_alternating_detection_suppressed` |
-| 7 | Same object stays 10+ seconds → one announcement | `test_one_announcement_over_ten_seconds` |
-| 8 | Two objects at once → highest priority only | `test_person_beats_chair`, `test_chair_beats_unknown` |
-| 9 | Person suddenly appears close → immediate URGENT | `test_immediate_urgent_no_persistence_delay` |
-| + | Buzzer stays on during hysteresis window | `test_buzzer_stays_on_during_hysteresis` |
-| + | `speak()` called exactly once per label | `test_speak_called_once` |
+| **1** | Person at 2 m $\rightarrow$ speak once, then silent | `TestScenario1_PersonAtMidRange` |
+| **2** | Chair at 1.5 m $\rightarrow$ speak once, silent after | `TestScenario2_ChairAtMidRange` |
+| **3** | Object at 50 cm $\rightarrow$ URGENT regardless of camera | `TestScenario3_ObjectAt50cm` |
+| **4** | Close distance, camera sees nothing $\rightarrow$ still URGENT | `TestScenario4_UltrasonicCloseNoCamera` |
+| **5** | Camera sees object but distance is far $\rightarrow$ stay silent | `TestScenario5_CameraSeesObjectFarAway` |
+| **6** | Detection flickers frame to frame $\rightarrow$ suppressed by persistence gate | `TestScenario6_FlickeringDetections` |
+| **7** | Same object stays in view 10+ s $\rightarrow$ announced once only | `TestScenario7_SameObjectTenSeconds` |
+| **8** | Two objects at once $\rightarrow$ announce highest priority only | `TestScenario8_MultiObjectPriority` |
+| **9** | Person suddenly appears close $\rightarrow$ immediate URGENT (no persistence delay) | `TestScenario9_PersonSuddenlyClose` |
+| **+** | Buzzer stays on during 1.5s hysteresis window | `TestUrgentHysteresis` |
+| **+** | Voice announcements are idempotent per label | `TestInformativeState` |
+| **+** | Monocular distance maps bounding box height to zones | `test_distance_estimator.py` |
 
 ---
 
-## Architecture Diagram
+## 8. Continuous Integration (CI)
 
-```
-Ultrasonic Reader ──┐
-                    ├──▶  FusionEngine.process(frame)
-Camera Detector ────┘          │
-                               │ FusionResult(action, label, zone)
-                               ▼
-                        StateMachine.update(result)
-                               │
-                    ┌──────────┼──────────┐
-                    ▼          ▼          ▼
-                  TTS       Buzzer    (Tone)
-               (speak once) (continuous) (approaching)
-```
-
----
-
-## Common Issues
-
-**`UnicodeEncodeError: cp1252`** — Run with `python -X utf8 ...` on Windows.
-
-**Object never announced in tests** — Check that frame timestamps don't start at `0.0`. The cooldown gate uses a `None` sentinel for "never announced"; a `0.0` base timestamp is fine as long as frames are not at exactly `t=0`.
-
-**Persistence gate never fills** — If a detection label appears then disappears then reappears (flickering), the streak resets each gap. Three consecutive frames with the same label are required.
-
-**Buzzer won't stop** — The hysteresis window (`URGENT_HYSTERESIS_SEC = 1.5s`) keeps it on briefly after distance clears. This is intentional. Shorten the constant if needed.
+A GitHub Actions workflow is active under `.github/workflows/ci.yml`. On every push and pull request, it:
+1. Provisions Python 3.10, 3.11, and 3.12 runners.
+2. Installs `uv` and synchronizes dependencies.
+3. Executes `pytest` with coverage report generation.
+4. Runs `ruff` linting across all source and test files.

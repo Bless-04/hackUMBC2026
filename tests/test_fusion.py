@@ -13,11 +13,10 @@ from __future__ import annotations
 
 import pytest
 
-from fusion import FusionAction, FusionEngine, SensorFrame
+from fusion import FusionAction, FusionEngine
 
 # Fixtures and helpers are injected from tests/conftest.py
 from tests.conftest import make_det, make_frame, run_ticks
-
 
 # ===========================================================================
 # Scenario 1 — Person at 2 m → speak once, then silent
@@ -271,7 +270,6 @@ class TestZoneBoundaries:
         (3.00,  "FAR"),
     ])
     def test_zone_at_distance(self, distance_m, expected_zone_name):
-        from fusion import Zone
         engine = FusionEngine()
         zone = engine._compute_zone(distance_m)
         assert zone.name == expected_zone_name, (

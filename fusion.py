@@ -25,7 +25,6 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Optional
 
-
 # ---------------------------------------------------------------------------
 # Shared data contract — agree with both freshmen on day 1
 # ---------------------------------------------------------------------------

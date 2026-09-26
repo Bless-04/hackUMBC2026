@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import threading
 
-
 # ---------------------------------------------------------------------------
 # Real implementation — IT freshman fills this in
 # ---------------------------------------------------------------------------

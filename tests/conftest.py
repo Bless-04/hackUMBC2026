@@ -3,12 +3,12 @@ conftest.py — shared pytest fixtures for GuideSense test suite
 """
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from fusion import Detection, FusionEngine, SensorFrame
 from state_machine import HardwareInterface, StateMachine
-
 
 # ---------------------------------------------------------------------------
 # Builder helpers (available to every test via import or direct call)

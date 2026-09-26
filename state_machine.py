@@ -21,7 +21,6 @@ from typing import Optional
 
 from fusion import FusionAction, FusionResult
 
-
 # ---------------------------------------------------------------------------
 # System states
 # ---------------------------------------------------------------------------
