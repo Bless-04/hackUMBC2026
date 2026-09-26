@@ -1,31 +1,11 @@
-"""
-audio.py — IT Freshman's Module
-=================================
-Text-to-speech output for INFORMATIVE announcements.
-
-OWNED BY: Freshman #2 (Information Technology)
-CALLED BY: Senior (CS) via state_machine.HardwareInterface.speak()
-
-Contract:
-  audio.AudioOutput().speak(text: str) -> None
-    Speaks `text` aloud using TTS.
-    Must be non-blocking (fire-and-forget) OR fast enough to return
-    before the next tick fires (~100 ms).
-    Recommended: run TTS in a background thread.
-
-Recommended library: pyttsx3 (offline, no API key needed)
-  pip install pyttsx3
-  On Raspberry Pi also: sudo apt install espeak
-
-How to test standalone:
-  python -X utf8 audio.py
-  -> speaks "person" and "chair" with a pause between
-"""
+"""Non-blocking text-to-speech output for GuideSense announcements."""
 
 from __future__ import annotations
 
+import queue
 import threading
-from typing import Optional, Union
+from types import ModuleType
+from typing import Any, Optional, Union
 
 from fusion import Direction, FusionAction, FusionResult
 
@@ -92,82 +72,127 @@ def format_voice_message(
 
 
 # ---------------------------------------------------------------------------
-# Real implementation — IT freshman fills this in
+# AudioOutput
 # ---------------------------------------------------------------------------
 
 class AudioOutput:
     """
-    Non-blocking voice speaker.
-    Prefers ElevenLabs natural voice if API key is present in .env,
-    with automatic fallback to local offline pyttsx3.
+    Serialize speech on one background worker so sensing is never blocked.
+
+    ElevenLabs is preferred when configured. If it is unavailable or a call
+    fails, the same utterance falls back to local ``pyttsx3`` and finally to a
+    console message. A single worker avoids overlapping announcements and the
+    thread-affinity issues some platform TTS engines have.
     """
 
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._eleven = None
-        self._pyttsx3_engine = None
+    def __init__(self, *, rate: int = 150, volume: float = 1.0) -> None:
+        self._rate = rate
+        self._volume = volume
+        self._eleven: Any | None = None
+        self._pyttsx3: ModuleType | None = None
+        self._pyttsx3_engine: Any | None = None
+        self._queue: queue.Queue[str | None] = queue.Queue()
+        self._state_lock = threading.Lock()
+        self._closed = False
 
-        # 1. Try initializing ElevenLabs
         try:
             from eleven_audio import ElevenLabsVoice
+
             voice = ElevenLabsVoice()
             if voice.is_available:
                 self._eleven = voice
-                print("[AudioOutput] ElevenLabs Studio Voice ACTIVE")
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[AudioOutput] ElevenLabs unavailable: {exc}")
 
-        # 2. Setup local pyttsx3 fallback
         try:
             import pyttsx3
-            self._pyttsx3_engine = pyttsx3.init()
-            self._pyttsx3_engine.setProperty("rate", 150)
-            self._pyttsx3_engine.setProperty("volume", 1.0)
-        except Exception:
-            pass
 
-        if not self._eleven and not self._pyttsx3_engine:
-            print("[AudioOutput] Console text fallback mode")
+            self._pyttsx3 = pyttsx3
+        except (ImportError, RuntimeError):
+            self._pyttsx3 = None
+
+        if self._eleven is not None:
+            backend = "ElevenLabs with local fallback"
+        elif self._pyttsx3 is not None:
+            backend = "local pyttsx3"
+        else:
+            backend = "console fallback"
+        print(f"[AudioOutput] {backend} active")
+
+        self._worker = threading.Thread(
+            target=self._run,
+            name="guidesense-tts",
+            daemon=True,
+        )
+        self._worker.start()
 
     def speak(self, text: str) -> None:
-        """
-        Speak `text` aloud non-blocking (fires background daemon thread).
-        """
-        def _run():
-            with self._lock:
-                # 1. Try ElevenLabs
-                if self._eleven:
-                    try:
-                        success = self._eleven.speak(text)
-                        if success:
-                            return
-                    except Exception as e:
-                        print(f"[AudioOutput] ElevenLabs error, falling back: {e}")
+        """Queue an utterance and return immediately."""
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
+        utterance = text.strip()
+        if not utterance:
+            return
 
-                # 2. Try pyttsx3
-                if self._pyttsx3_engine:
-                    try:
-                        self._pyttsx3_engine.say(text)
-                        self._pyttsx3_engine.runAndWait()
-                        return
-                    except Exception:
-                        pass
+        with self._state_lock:
+            if self._closed:
+                return
+            self._queue.put_nowait(utterance)
 
-                # 3. Console print fallback
-                print(f"[TTS Audio] '{text}'")
+    def _run(self) -> None:
+        while True:
+            text = self._queue.get()
+            try:
+                if text is None:
+                    return
+                self._speak_now(text)
+            finally:
+                self._queue.task_done()
 
-        t = threading.Thread(target=_run, daemon=True)
-        t.start()
+    def _speak_now(self, text: str) -> None:
+        if self._eleven is not None:
+            try:
+                if self._eleven.speak(text):
+                    return
+            except Exception as exc:
+                print(f"[AudioOutput] ElevenLabs failed; using local voice: {exc}")
 
+        if self._pyttsx3 is not None:
+            try:
+                # Initialize and use the engine on the same worker thread.
+                if self._pyttsx3_engine is None:
+                    self._pyttsx3_engine = self._pyttsx3.init()
+                    self._pyttsx3_engine.setProperty("rate", self._rate)
+                    self._pyttsx3_engine.setProperty("volume", self._volume)
+                self._pyttsx3_engine.say(text)
+                self._pyttsx3_engine.runAndWait()
+                return
+            except Exception as exc:
+                print(f"[AudioOutput] local TTS failed: {exc}")
+                self._pyttsx3_engine = None
 
-# ---------------------------------------------------------------------------
-# Standalone test
-# ---------------------------------------------------------------------------
+        print(f"[TTS Audio] '{text}'")
+
+    def close(self, timeout: float = 2.0) -> None:
+        """Stop after already-queued speech. Safe to call repeatedly."""
+        with self._state_lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._queue.put_nowait(None)
+        if threading.current_thread() is not self._worker:
+            self._worker.join(timeout=max(0.0, timeout))
+
+    def __enter__(self) -> "AudioOutput":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
 
 if __name__ == "__main__":
-    import time
-    tts = AudioOutput()
+    output = AudioOutput()
     print("Testing AudioOutput...")
-    tts.speak("GuideSense initialized with Gemini, ElevenLabs, and Backboard.")
-    time.sleep(3.0)
+    output.speak("GuideSense initialized with Gemini, ElevenLabs, and Backboard.")
+    output.close(timeout=10.0)
     print("Done.")

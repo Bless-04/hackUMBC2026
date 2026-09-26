@@ -10,13 +10,13 @@ ruff>=0.4
 backboard-sdk>=1.5.0
 
 # --- Vision pipeline (IT freshman) ---
-# opencv-python>=4.8     # uncomment when vision.py is implemented
+opencv-python>=4.8
 
 # --- Audio output (IT freshman) ---
-# pyttsx3>=2.90          # uncomment when audio.py is implemented
+pyttsx3>=2.90
 
 # --- Serial comms (CE freshman + IT freshman) ---
-# pyserial>=3.5          # uncomment when serial_reader.py / haptics.py are implemented
+pyserial>=3.5
 
 # --- Raspberry Pi GPIO (IT freshman, Pi only — not needed on CI) ---
 # RPi.GPIO>=0.7          # DO NOT uncomment on CI — Linux/Pi only
