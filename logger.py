@@ -22,12 +22,9 @@ from __future__ import annotations
 import csv
 import os
 import time
-from dataclasses import dataclass
-from typing import Optional
 
 from fusion import FusionAction, FusionResult
 from state_machine import SystemState
-
 
 # ---------------------------------------------------------------------------
 # Configuration

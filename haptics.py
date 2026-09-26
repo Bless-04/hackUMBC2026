@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import time
 
-
 # ---------------------------------------------------------------------------
 # Configuration — choose output mode
 # ---------------------------------------------------------------------------
@@ -71,7 +70,7 @@ class HapticOutput:
         """Looping urgency tone played through system audio / JBL speaker."""
         import platform
         is_windows = platform.system() == "Windows"
-        
+
         while not self._stop_event.is_set():
             if is_windows:
                 try:

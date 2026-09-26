@@ -8,9 +8,8 @@ No external dependencies beyond the standard library.
 
 from __future__ import annotations
 
-import time
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from fusion import (
     Detection,
@@ -19,7 +18,6 @@ from fusion import (
     SensorFrame,
 )
 from state_machine import HardwareInterface, StateMachine, SystemState
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -246,7 +244,6 @@ class TestStateMachineHysteresis(unittest.TestCase):
 
     def test_buzzer_stays_on_during_hysteresis(self):
         from fusion import FusionResult, Zone
-        from state_machine import URGENT_HYSTERESIS_SEC
 
         urgent_result = FusionResult(
             action=FusionAction.URGENT,

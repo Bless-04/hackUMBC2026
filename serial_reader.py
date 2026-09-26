@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import time
 
-
 # ---------------------------------------------------------------------------
 # Configuration — CE freshman sets these to match their Arduino sketch
 # ---------------------------------------------------------------------------

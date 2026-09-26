@@ -36,10 +36,8 @@ How to test standalone (before handoff):
 from __future__ import annotations
 
 import time
-from typing import Optional
 
 from fusion import Detection
-
 
 # ---------------------------------------------------------------------------
 # Configuration — IT freshman adjusts these to match their setup
