@@ -312,3 +312,202 @@ class TestConfidenceGate:
         ]
         actions = run_ticks(engine, frames)
         assert FusionAction.INFORMATIVE not in actions
+
+
+# ===========================================================================
+# Spatial Directional Awareness Tests
+# ===========================================================================
+
+@pytest.mark.fusion
+class TestSpatialDirectionalAwareness:
+    """Spatial direction calculation across zones, boundaries, and resolutions."""
+
+    def test_object_clearly_on_left(self):
+        from fusion import Direction, compute_direction, Detection
+
+        bbox = (10, 50, 100, 200)  # x_center = 55.0, 55/640 = 0.086 < 0.33
+        direction = compute_direction(bbox, frame_width=640)
+        assert direction == Direction.LEFT
+
+        det = Detection(label="person", confidence=0.85, bbox=bbox, frame_width=640)
+        assert det.direction == Direction.LEFT
+
+    def test_object_in_center(self):
+        from fusion import Direction, compute_direction, Detection
+
+        bbox = (260, 50, 380, 200)  # x_center = 320.0, 320/640 = 0.50 (0.33 - 0.66)
+        direction = compute_direction(bbox, frame_width=640)
+        assert direction == Direction.CENTER
+
+        det = Detection(label="chair", confidence=0.80, bbox=bbox, frame_width=640)
+        assert det.direction == Direction.CENTER
+
+    def test_object_clearly_on_right(self):
+        from fusion import Direction, compute_direction, Detection
+
+        bbox = (500, 50, 620, 200)  # x_center = 560.0, 560/640 = 0.875 > 0.66
+        direction = compute_direction(bbox, frame_width=640)
+        assert direction == Direction.RIGHT
+
+        det = Detection(label="vehicle", confidence=0.90, bbox=bbox, frame_width=640)
+        assert det.direction == Direction.RIGHT
+
+    def test_different_camera_resolutions(self):
+        from fusion import Direction, compute_direction
+
+        resolutions = [
+            (300, 300),    # MobileNet native
+            (640, 480),    # Standard VGA
+            (1280, 720),   # 720p HD
+            (1920, 1080),  # 1080p Full HD
+            (3840, 2160),  # 4K UHD
+        ]
+
+        for width, _ in resolutions:
+            left_box = (0, 0, int(width * 0.20), 100)
+            assert compute_direction(left_box, frame_width=width) == Direction.LEFT
+
+            center_box = (int(width * 0.40), 0, int(width * 0.60), 100)
+            assert compute_direction(center_box, frame_width=width) == Direction.CENTER
+
+            right_box = (int(width * 0.80), 0, width, 100)
+            assert compute_direction(right_box, frame_width=width) == Direction.RIGHT
+
+    def test_zone_boundaries(self):
+        from fusion import Direction, compute_direction
+
+        width = 1000
+
+        # Boundary at 0.33
+        assert compute_direction((328, 0, 328, 100), frame_width=width) == Direction.LEFT
+        assert compute_direction((330, 0, 330, 100), frame_width=width) == Direction.CENTER
+        assert compute_direction((332, 0, 332, 100), frame_width=width) == Direction.CENTER
+
+        # Boundary at 0.66
+        assert compute_direction((658, 0, 658, 100), frame_width=width) == Direction.CENTER
+        assert compute_direction((660, 0, 660, 100), frame_width=width) == Direction.CENTER
+        assert compute_direction((662, 0, 662, 100), frame_width=width) == Direction.RIGHT
+
+    def test_fusion_result_preserves_direction_and_confidence(self):
+        from fusion import Direction, Detection, FusionAction, FusionEngine, SensorFrame, Zone
+
+        engine = FusionEngine(persistence_ticks=1, cooldown_sec=12.0)
+        det_left = Detection(label="person", confidence=0.82, bbox=(10, 50, 100, 200), frame_width=640)
+        frame = SensorFrame(distance_m=1.2, detections=[det_left], timestamp=100.0, frame_width=640)
+
+        result = engine.process(frame)
+
+        assert result.action == FusionAction.INFORMATIVE
+        assert result.label == "person"
+        assert result.distance_m == 1.2
+        assert result.zone == Zone.MID
+        assert result.direction == Direction.LEFT
+        assert result.confidence == 0.82
+
+
+# ===========================================================================
+# Directional Voice Output Formatting Tests
+# ===========================================================================
+
+@pytest.mark.fusion
+class TestDirectionalVoiceOutput:
+    """Natural-language voice message formatting with spatial awareness."""
+
+    def test_informative_voice_messages(self):
+        from audio import format_voice_message
+        from fusion import Direction, FusionAction
+
+        msg_left = format_voice_message(label="person", direction=Direction.LEFT, action=FusionAction.INFORMATIVE)
+        assert msg_left == "Person on your left."
+
+        msg_center = format_voice_message(label="chair", direction=Direction.CENTER, action=FusionAction.INFORMATIVE)
+        assert msg_center == "Chair in front of you."
+
+        msg_right = format_voice_message(label="vehicle", direction=Direction.RIGHT, action=FusionAction.INFORMATIVE)
+        assert msg_right == "Vehicle on your right."
+
+    def test_urgent_hazard_voice_messages(self):
+        from audio import format_voice_message
+        from fusion import Direction, FusionAction
+
+        msg_urgent_left = format_voice_message(label="person", direction=Direction.LEFT, action=FusionAction.URGENT)
+        assert msg_urgent_left == "Stop. Person on your left."
+
+        msg_urgent_obstacle = format_voice_message(label=None, action=FusionAction.URGENT)
+        assert msg_urgent_obstacle == "Stop. Obstacle ahead."
+
+    def test_state_machine_speaks_directional_message(self, mock_hw, sm):
+        from fusion import Direction, FusionAction, FusionResult, Zone
+
+        result = FusionResult(
+            action=FusionAction.INFORMATIVE,
+            label="person",
+            distance_m=1.2,
+            zone=Zone.MID,
+            direction=Direction.LEFT,
+            confidence=0.82,
+        )
+
+        sm.update(result)
+        mock_hw.speak.assert_called_once_with("Person on your left.")
+
+
+# ===========================================================================
+# GuideSense HUD Tests
+# ===========================================================================
+
+@pytest.mark.fusion
+class TestGuideSenseHUD:
+    """Verifies live visual HUD overlay generation and state rendering."""
+
+    def test_hud_draws_on_different_resolutions(self):
+        import numpy as np
+        from hud import GuideSenseHUD
+        from fusion import Detection, Direction, FusionAction, FusionResult, SensorFrame, Zone
+        from state_machine import SystemState
+
+        hud = GuideSenseHUD(features={
+            "Camera": "Real",
+            "Arduino": "Connected",
+            "Gemini": "Active",
+            "Backboard": "Active",
+            "Logging": "Active",
+        })
+
+        for w, h in [(640, 480), (1280, 720), (1920, 1080)]:
+            canvas = np.zeros((h, w, 3), dtype=np.uint8)
+            det = Detection("person", 0.92, (int(w * 0.1), int(h * 0.2), int(w * 0.3), int(h * 0.8)), frame_width=w)
+            frame = SensorFrame(distance_m=1.5, detections=[det], frame_width=w)
+            result = FusionResult(
+                action=FusionAction.INFORMATIVE,
+                label="person",
+                distance_m=1.5,
+                zone=Zone.MID,
+                direction=Direction.LEFT,
+                confidence=0.92,
+            )
+
+            rendered = hud.draw_hud(canvas, frame, result, SystemState.INFORMATIVE)
+            assert rendered.shape == (h, w, 3)
+            assert np.any(rendered > 0)
+
+    def test_hud_handles_all_system_states(self):
+        import numpy as np
+        from hud import GuideSenseHUD
+        from fusion import Detection, FusionAction, FusionResult, SensorFrame, Zone
+        from state_machine import SystemState
+
+        hud = GuideSenseHUD()
+        canvas = np.zeros((480, 640, 3), dtype=np.uint8)
+        frame = SensorFrame(distance_m=0.4, detections=[Detection("chair", 0.85, (50, 100, 200, 400))], frame_width=640)
+
+        # 1. URGENT state
+        res_urgent = FusionResult(action=FusionAction.URGENT, label="chair", distance_m=0.4, zone=Zone.NEAR)
+        out_urgent = hud.draw_hud(canvas, frame, res_urgent, SystemState.URGENT)
+        assert out_urgent.shape == (480, 640, 3)
+
+        # 2. SILENT state
+        res_silent = FusionResult(action=FusionAction.SILENT, distance_m=3.5, zone=Zone.FAR)
+        out_silent = hud.draw_hud(canvas, frame, res_silent, SystemState.SILENT)
+        assert out_silent.shape == (480, 640, 3)
+

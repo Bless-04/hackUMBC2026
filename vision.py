@@ -73,6 +73,11 @@ class VisionReader:
         self._init_camera()
         self._init_detectors()
 
+    @property
+    def latest_frame(self) -> Optional[np.ndarray]:
+        """Returns the most recent raw BGR camera frame."""
+        return self._latest_frame
+
     def _init_camera(self) -> None:
         try:
             import cv2

@@ -25,6 +25,71 @@ How to test standalone:
 from __future__ import annotations
 
 import threading
+from typing import Optional, Union
+
+from fusion import Direction, FusionAction, FusionResult
+
+
+# ---------------------------------------------------------------------------
+# Centralized Natural-Language Voice Formatting
+# ---------------------------------------------------------------------------
+
+def format_voice_message(
+    label: Optional[str] = None,
+    direction: Optional[Direction] = None,
+    action: FusionAction = FusionAction.INFORMATIVE,
+    result: Optional[FusionResult] = None,
+) -> str:
+    """
+    Centralized function converting a confirmed fusion event / detection into
+    natural-language speech with spatial awareness.
+
+    Examples:
+      - INFORMATIVE + LEFT   -> "Person on your left."
+      - INFORMATIVE + CENTER -> "Chair in front of you."
+      - INFORMATIVE + RIGHT  -> "Vehicle on your right."
+      - INFORMATIVE + None   -> "person"
+      - URGENT + LEFT        -> "Stop. Person on your left."
+      - URGENT + None        -> "Stop. Obstacle ahead."
+    """
+    if result is not None:
+        label = result.label if label is None else label
+        direction = result.direction if direction is None else direction
+        action = result.action if action is None else action
+
+    if action == FusionAction.URGENT:
+        if label:
+            cap_label = label.strip().capitalize()
+            if direction == Direction.LEFT:
+                return f"Stop. {cap_label} on your left."
+            elif direction == Direction.RIGHT:
+                return f"Stop. {cap_label} on your right."
+            elif direction == Direction.CENTER:
+                return f"Stop. {cap_label} in front of you."
+            else:
+                return f"Stop. {cap_label} ahead."
+        else:
+            if direction == Direction.LEFT:
+                return "Stop. Obstacle on your left."
+            elif direction == Direction.RIGHT:
+                return "Stop. Obstacle on your right."
+            else:
+                return "Stop. Obstacle ahead."
+
+    # INFORMATIVE path
+    if not label:
+        return ""
+
+    cap_label = label.strip().capitalize()
+    if direction == Direction.LEFT:
+        return f"{cap_label} on your left."
+    elif direction == Direction.RIGHT:
+        return f"{cap_label} on your right."
+    elif direction == Direction.CENTER:
+        return f"{cap_label} in front of you."
+    else:
+        return label.strip()
+
 
 # ---------------------------------------------------------------------------
 # Real implementation — IT freshman fills this in
