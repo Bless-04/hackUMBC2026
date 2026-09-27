@@ -9,14 +9,8 @@ ruff>=0.4
 # --- AI Cloud & Persistent Memory ---
 backboard-sdk>=1.5.0
 
-# --- Vision pipeline (IT freshman) ---
+# --- Vision pipeline ---
 opencv-python>=4.8,<5.0
 
-# --- Audio output (IT freshman) ---
+# --- Audio output ---
 pyttsx3>=2.90
-
-# --- Serial comms (CE freshman + IT freshman) ---
-pyserial>=3.5
-
-# --- Raspberry Pi GPIO (IT freshman, Pi only — not needed on CI) ---
-# RPi.GPIO>=0.7          # DO NOT uncomment on CI — Linux/Pi only

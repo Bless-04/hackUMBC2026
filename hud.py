@@ -694,10 +694,9 @@ class GuideSenseHUD:
             alpha=0.90,
         )
 
-        # Active hardware feature chips
+        # Active feature chips
         items = [
             ("CAM", self.features.get("Camera", "Active")),
-            ("ARDUINO", self.features.get("Arduino", "Mock")),
             ("GEMINI", self.features.get("Gemini", "Off")),
             ("BACKBOARD", self.features.get("Backboard", "Off")),
             ("LOG", self.features.get("Logging", "Active")),

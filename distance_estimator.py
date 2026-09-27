@@ -1,7 +1,6 @@
 """
 distance_estimator.py — Monocular Distance Estimation from Camera Bounding Boxes
 ================================================================================
-Used when physical ultrasonic sensor is unavailable.
 Estimates object distance in metres using the apparent vertical height of
 the detected bounding box relative to the camera frame height.
 
@@ -42,7 +41,7 @@ DEFAULT_FRAME_HEIGHT = 480
 class CameraDistanceEstimator:
     """
     Computes an estimated distance in metres from camera detections.
-    Exposes `.read()` so it is a direct drop-in replacement for SerialDistanceReader.
+    Exposes `.read()` for each sensing tick.
     """
 
     def __init__(

@@ -3,8 +3,8 @@ state_machine.py — GuideSense System State Machine
 ====================================================
 Consumes FusionResult objects and manages hardware output:
   • Voice/TTS — INFORMATIVE announcements
-  • Buzzer    — continuous during URGENT
-  • Hysteresis on URGENT exit so the buzzer doesn't flicker at the boundary
+  • Urgent tone — continuous during URGENT
+  • Hysteresis on URGENT exit so the tone doesn't flicker at the boundary
 
 States:
   SILENT → INFORMATIVE → (APPROACHING →) URGENT
@@ -30,17 +30,17 @@ class SystemState(Enum):
     SILENT      = auto()
     INFORMATIVE = auto()   # speaking an announcement, then cooldown
     APPROACHING = auto()   # optional escalation tone
-    URGENT      = auto()   # buzzer firing
+    URGENT      = auto()   # urgent tone active
 
 
 # ---------------------------------------------------------------------------
-# Hardware output interface — swap real implementations in main.py
+# Output interface — swap implementations in main.py
 # ---------------------------------------------------------------------------
 
 class HardwareInterface:
     """
     Thin abstraction over physical outputs.
-    Replace each method with real hardware calls in main.py.
+    Replace each method with audio and alert output in main.py.
     """
 
     def speak(self, text: str) -> None:
