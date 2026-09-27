@@ -19,10 +19,12 @@ def make_handler(controller, token):
         def log_message(self, *_):
             pass
 
-        def send(self, code, body=b"", mime="application/json; charset=utf-8"):
+        def send(self, code, body=b"", mime="application/json; charset=utf-8", attachment=None):
             self.send_response(code)
             self.send_header("Content-Type", mime)
             self.send_header("Content-Length", str(len(body)))
+            if attachment:
+                self.send_header("Content-Disposition", f'attachment; filename="{attachment}"')
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
@@ -53,7 +55,8 @@ def make_handler(controller, token):
                     jpeg = controller.jpeg
                 return self.send(200 if jpeg else 204, jpeg or b"", "image/jpeg")
             if path == "/api/export":
-                return self.send(200, controller.export(), "text/csv; charset=utf-8")
+                return self.send(200, controller.export(), "text/csv; charset=utf-8",
+                                 attachment="guidesense-activity.csv")
             assets = {"/": ("index.html", "text/html; charset=utf-8"),
                       "/app.css": ("app.css", "text/css; charset=utf-8"),
                       "/app.js": ("app.js", "text/javascript; charset=utf-8"),

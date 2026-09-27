@@ -18,6 +18,8 @@ from pathlib import Path
 from fusion import Detection, FusionAction, FusionEngine, SensorFrame
 from state_machine import HardwareInterface, StateMachine
 
+SESSION_DIR = Path(__file__).parent / "sessions"
+
 
 def validate_config(data: dict) -> dict:
     if not isinstance(data, dict):
@@ -172,7 +174,8 @@ class SessionController:
             if config["voice"]:
                 from audio import AudioOutput
                 from haptics import HapticOutput
-                audio, haptic = AudioOutput(), HapticOutput()
+                audio = AudioOutput()
+                haptic = HapticOutput()
                 services["voice"] = "Enabled"
             if config["gemini"]:
                 from gemini_narrator import GeminiNarrator
@@ -184,7 +187,7 @@ class SessionController:
                 services["backboard"] = "Configured" if memory.is_cloud_enabled else "Local memory"
             if config["logging"]:
                 from logger import EventLogger
-                path = Path(__file__).parent / "sessions" / f"session-{time.time_ns()}.csv"
+                path = SESSION_DIR / f"session-{time.time_ns()}.csv"
                 logger = EventLogger(path)
                 services["logging"] = "Recording"
             hardware = DashboardHardware(self, generation, audio, haptic)

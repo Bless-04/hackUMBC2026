@@ -61,7 +61,7 @@
             <div class="stage-empty" id="stage-empty"><span class="stage-icon"><svg><use href="#i-camera"/></svg></span><h3>Ready when you are.</h3><p>Start a session to bring your surroundings into focus.</p><button id="stage-start" class="stage-button">Explore demo <svg><use href="#i-arrow"/></svg></button></div>
             <div class="camera-bottom"><span><i class="dot"></i><span id="frame-info">Illustrated preview · no camera access</span></span><button id="fullscreen-button" aria-label="Expand camera view" title="Expand camera view"><svg><use href="#i-expand"/></svg></button></div>
           </div>
-          <div class="camera-footer"><span><i class="dot soft"></i>Processed locally with MobileNet-SSD</span><span class="keyboard-hint"><kbd>F</kbd> Full screen</span></div>
+          <div class="camera-footer"><span><i class="dot soft"></i><span id="processing-label">Simulated demo · no model inference</span></span><span class="keyboard-hint"><kbd>F</kbd> Full screen</span></div>
         </section>
 
         <div class="insight-column">
@@ -76,7 +76,7 @@
       <section class="recent-line"><div><svg><use href="#i-wave"/></svg><strong>Latest activity</strong><span id="latest-event">Your next session starts a new story.</span></div><button class="text-button" data-view="activity">View activity <span>↗</span></button></section>
     </section>
 
-    <section id="activity-view" hidden><div class="card activity-card"><div class="card-heading"><div><h2>Session timeline</h2><p>State changes, announcements, and session events. Latest first.</p></div><button class="button secondary" id="export-button"><svg><use href="#i-download"/></svg>Export CSV</button></div><div id="activity-list" class="activity-list"><p class="activity-empty">Start a session to see its story unfold.</p></div></div></section>
+    <section id="activity-view" hidden><div class="card activity-card"><div class="card-heading"><div><h2>Session timeline</h2><p>State changes, announcements, and session events. Latest first.</p></div><a class="button secondary" id="export-button" href="/api/export" download="guidesense-activity.csv"><svg><use href="#i-download"/></svg>Export CSV</a></div><div id="activity-list" class="activity-list"><p class="activity-empty">Start a session to see its story unfold.</p></div></div></section>
     <footer class="page-footer"><span><img src="/mark.svg" alt="" width="16" height="16">Designed for awareness. Built for independence.</span><span>GuideSense <span class="footer-dot">·</span> Local dashboard</span></footer>
   </main>
 </div>
