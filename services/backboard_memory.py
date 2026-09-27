@@ -77,7 +77,7 @@ class BackboardMemory:
                     new_a = await client.create_assistant(
                         name=self.assistant_name,
                         description="Spatial memory assistant for GuideSense low-vision navigation",
-                        system_prompt="Track landmarks, obstacles, and navigation history for a visually impaired user.",
+                        system_prompt="Track landmarks, obstacles, and navigation history for a visually impaired user. Keep all answers under 8 words, strictly informative with no instructions.",
                     )
                     await client.aclose()
                     return new_a.assistant_id
@@ -198,7 +198,7 @@ class BackboardMemory:
                         prompt = (
                             f"Context from navigation memory: {ctx}\n"
                             f"User question: {question}\n"
-                            "Answer in 1 concise sentence for a blind user navigating with GuideSense."
+                            "Answer in 8 words max for a blind user navigating with GuideSense. Strictly informative, no instructions."
                         )
                         resp = None
                         for model_name in ["gemini-3.1-flash-lite", "gemini-3.8-flash"]:
@@ -238,11 +238,11 @@ class BackboardMemory:
                 narrator = GeminiNarrator()
                 if narrator.is_available:
                     prompt = (
-                        f"The user is asking: '{question}'. "
-                        f"Here is their recent navigation memory history: {mem_context}. "
-                        f"Answer their question in 1 concise sentence based on these memories."
+                        f"Context from recent navigation memory: {mem_context}\n"
+                        f"User question: {question}\n"
+                        "Answer in 8 words max for a blind user navigating with GuideSense. Strictly informative, no instructions."
                     )
-                    reply = narrator.describe_scene(label=prompt)
+                    reply = narrator.describe_scene(custom_prompt=prompt)
                     if reply:
                         on_response(reply)
                         return
