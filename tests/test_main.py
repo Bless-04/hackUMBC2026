@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 import main
-from fusion import Detection
+from core.fusion import Detection
 
 
 def test_live_cli_uses_camera_frame_size_for_distance(monkeypatch):

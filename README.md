@@ -70,24 +70,31 @@ it cannot open instead of showing simulated detections.
 ## How it works
 
 ```text
-Logitech webcam → vision.py (OpenCV + MobileNet SSD) → detections
-                                           ↓
-                         distance_estimator.py → estimated metres
-                                           ↓
-                          fusion.py → state_machine.py
-                                           ↓
-                    ui/ dashboard, computer audio, CSV log
+Logitech webcam → vision/ (OpenCV + MobileNet SSD) → detections
+                                       ↓
+                    vision/distance_estimator.py → estimated metres
+                                       ↓
+                     core/fusion.py → core/state_machine.py
+                                       ↓
+                  ui/ dashboard, hardware audio alert, telemetry log
 ```
 
-`vision.py` uses the bundled `MobileNetSSD_deploy.prototxt` and
-`MobileNetSSD_deploy.caffemodel`. The camera supplies both the displayed frames
-and the detections used by the decision engine. `fusion.py` applies the same
-near, mid, and far rules on every platform. `audio.py` speaks guidance through
+The codebase is organized into domain-specific modules:
+- `core/`: Central decision logic (`fusion.py`, `state_machine.py`).
+- `vision/`: Camera capture, MobileNet SSD DNN models (`models/`), and distance estimation (`distance_estimator.py`, `distance.py`).
+- `hardware/`: Cross-platform audio synthesis (`audio.py`, `audio_playback.py`), ElevenLabs (`eleven_audio.py`), and urgent tone alerts (`haptics.py`).
+- `services/`: Optional cloud integrations for Gemini scene narration (`gemini_narrator.py`) and Backboard memory (`backboard_memory.py`).
+- `telemetry/`: Event recording and CSV session logging (`logger.py`).
+- `ui/`: Browser dashboard server (`server.py`), real-time HUD rendering (`hud.py`), and session runtime controller (`runtime.py`).
+
+`vision/vision.py` uses the bundled `vision/models/MobileNetSSD_deploy.prototxt` and
+`vision/models/MobileNetSSD_deploy.caffemodel`. The camera supplies both the displayed frames
+and the detections used by the decision engine. `core/fusion.py` applies the same
+near, mid, and far rules on every platform. `hardware/audio.py` speaks guidance through
 ElevenLabs when configured, otherwise through local text to speech where
-available. `haptics.py` preserves the state machine alert interface but plays
+available. `hardware/haptics.py` preserves the state machine alert interface but plays
 an urgent tone through the computer audio output. It does not drive a physical
 vibration device.
-
 For optional cloud features, set `GEMINI_API_KEY`, `ELEVEN_LABS_API_KEY`, and/or
 `BACKBOARD_API_KEY` as environment variables or in a local `.env` file. The
 `.env` file is ignored by Git. Gemini may receive a camera image, Backboard

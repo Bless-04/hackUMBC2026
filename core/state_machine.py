@@ -19,8 +19,8 @@ import time
 from enum import Enum, auto
 from typing import Optional, Union
 
-from audio import format_voice_message
-from fusion import FusionAction, FusionResult
+from core.fusion import FusionAction, FusionResult
+from hardware.audio import format_voice_message
 
 # ---------------------------------------------------------------------------
 # System states

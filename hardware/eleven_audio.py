@@ -25,7 +25,7 @@ import urllib.request
 import wave
 from typing import Callable, Optional
 
-from audio_playback import play_wav_bytes
+from hardware.audio_playback import play_wav_bytes
 
 # ElevenLabs configuration
 DEFAULT_VOICE_ID = "XrExE9yKIg1WjnnlVkGX"  # Maltida

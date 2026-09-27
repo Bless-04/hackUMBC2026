@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fusion import Detection
+from core.fusion import Detection
 
 CAMERA_INDEX = 0
 INPUT_WIDTH = 300
@@ -74,11 +74,23 @@ INDOOR_LABEL_MAP: dict[str, str | None] = {
 
 
 def _model_path(value: str | Path) -> Path:
-    """Resolve default model files next to this module, independent of cwd."""
+    """Resolve default model files in models/, next to this module, or repo root."""
     path = Path(value).expanduser()
-    if path.is_absolute() or path.exists():
+    if path.is_absolute() and path.exists():
         return path.resolve()
-    return (Path(__file__).resolve().parent / path).resolve()
+    if path.exists():
+        return path.resolve()
+    pkg_dir = Path(__file__).resolve().parent
+    if (pkg_dir / "models" / path.name).is_file():
+        return (pkg_dir / "models" / path.name).resolve()
+    if (pkg_dir / path.name).is_file():
+        return (pkg_dir / path.name).resolve()
+    repo_root = pkg_dir.parent
+    if (repo_root / path.name).is_file():
+        return (repo_root / path.name).resolve()
+    if (repo_root / "models" / path.name).is_file():
+        return (repo_root / "models" / path.name).resolve()
+    return (pkg_dir / "models" / path.name).resolve()
 
 
 def _ensure_model_files(config_path: Path, weights_path: Path) -> None:

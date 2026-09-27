@@ -9,8 +9,8 @@ import time
 from pathlib import Path
 from typing import TextIO
 
-from fusion import FusionResult, SensorFrame
-from state_machine import SystemState
+from core.fusion import FusionResult, SensorFrame
+from core.state_machine import SystemState
 
 DEFAULT_LOG_PATH = "guidesense_log.csv"
 FLUSH_EVERY_N = 10

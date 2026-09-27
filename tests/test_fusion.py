@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from fusion import FusionAction, FusionEngine
+from core.fusion import FusionAction, FusionEngine
 
 # Fixtures and helpers are injected from tests/conftest.py
 from tests.conftest import make_det, make_frame, run_ticks
@@ -462,7 +462,6 @@ class TestGuideSenseHUD:
 
     def test_hud_draws_on_different_resolutions(self):
         import numpy as np
-
         from fusion import Detection, Direction, FusionAction, FusionResult, SensorFrame, Zone
         from hud import GuideSenseHUD
         from state_machine import SystemState
@@ -493,7 +492,6 @@ class TestGuideSenseHUD:
 
     def test_hud_handles_all_system_states(self):
         import numpy as np
-
         from fusion import Detection, FusionAction, FusionResult, SensorFrame, Zone
         from hud import GuideSenseHUD
         from state_machine import SystemState

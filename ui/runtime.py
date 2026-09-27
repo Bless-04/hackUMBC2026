@@ -15,8 +15,8 @@ import time
 from collections import deque
 from pathlib import Path
 
-from fusion import Detection, FusionAction, FusionEngine, SensorFrame
-from state_machine import HardwareInterface, StateMachine
+from core.fusion import Detection, FusionAction, FusionEngine, SensorFrame
+from core.state_machine import HardwareInterface, StateMachine
 
 SESSION_DIR = Path(__file__).parent / "sessions"
 
@@ -164,37 +164,44 @@ class SessionController:
         try:
             services = dict(self.data["services"])
             if config["mode"] == "camera":
-                from distance_estimator import CameraDistanceEstimator
-                from vision import VisionReader
-                reader = VisionReader(camera_index=config["camera"])
-                estimator = CameraDistanceEstimator()
+                import distance_estimator
+
+                import vision
+
+                reader = vision.VisionReader(camera_index=config["camera"])
+                estimator = distance_estimator.CameraDistanceEstimator()
                 services["camera"] = f"Camera {config['camera']}"
             else:
                 services["camera"] = "Simulated"
             if config["voice"]:
-                from audio import AudioOutput
-                from haptics import HapticOutput
-                audio = AudioOutput()
-                haptic = HapticOutput()
+                import audio as audio_mod
+                import haptics as haptics_mod
+
+                audio = audio_mod.AudioOutput()
+                haptic = haptics_mod.HapticOutput()
                 services["voice"] = "Enabled"
             if config["gemini"]:
-                from gemini_narrator import GeminiNarrator
-                narrator = GeminiNarrator()
+                import gemini_narrator
+
+                narrator = gemini_narrator.GeminiNarrator()
                 services["gemini"] = "Configured" if narrator.is_available else "Key missing"
             if config["backboard"]:
-                from backboard_memory import BackboardMemory
-                memory = BackboardMemory()
+                import backboard_memory
+
+                memory = backboard_memory.BackboardMemory()
                 services["backboard"] = "Configured" if memory.is_cloud_enabled else "Local memory"
             if config["logging"]:
-                from logger import EventLogger
+                import logger as logger_mod
+
                 path = SESSION_DIR / f"session-{time.time_ns()}.csv"
-                logger = EventLogger(path)
+                logger = logger_mod.EventLogger(path)
                 services["logging"] = "Recording"
             hardware = DashboardHardware(self, generation, audio, haptic)
             machine = StateMachine(hardware)
             engine = FusionEngine()
-            from hud import GuideSenseHUD
-            hud = GuideSenseHUD(
+            import hud as hud_mod
+
+            hud_obj = hud_mod.GuideSenseHUD(
                 features={
                     "Camera": services.get("camera", "Active"),
                     "Gemini": services.get("gemini", "Off"),
@@ -246,8 +253,8 @@ class SessionController:
                 )
                 if should_render:
                     import cv2
-                    hud_base = image if image is not None else hud._create_synthetic_canvas(width, height)
-                    hud_frame = hud.draw_hud(hud_base, frame, result, state)
+                    hud_base = image if image is not None else hud_obj._create_synthetic_canvas(width, height)
+                    hud_frame = hud_obj.draw_hud(hud_base, frame, result, state)
                     ok, encoded = cv2.imencode(".jpg", hud_frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
                     if ok:
                         jpeg = encoded.tobytes()

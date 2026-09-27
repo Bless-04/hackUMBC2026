@@ -13,7 +13,7 @@ Provides a distance estimate (metres) for the SensorFrame consumed by FusionEngi
 
 from __future__ import annotations
 
-from fusion import NEAR_THRESHOLD_M, Detection
+from core.fusion import NEAR_THRESHOLD_M, Detection
 
 # ---------------------------------------------------------------------------
 # Calibrated Constants & Thresholds

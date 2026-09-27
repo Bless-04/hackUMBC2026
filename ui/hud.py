@@ -29,8 +29,7 @@ from typing import Any, Optional
 import cv2
 import numpy as np
 
-from distance import estimate_distance_m, get_real_height_cm
-from fusion import (
+from core.fusion import (
     MID_THRESHOLD_M,
     NEAR_THRESHOLD_M,
     Direction,
@@ -39,7 +38,8 @@ from fusion import (
     Zone,
     compute_direction,
 )
-from state_machine import SystemState
+from core.state_machine import SystemState
+from vision.distance import estimate_distance_m, get_real_height_cm
 
 # ---------------------------------------------------------------------------
 # Visual Theme & Color Palette (BGR for OpenCV)

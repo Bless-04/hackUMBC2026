@@ -7,7 +7,7 @@ import threading
 from types import ModuleType
 from typing import Any, Optional
 
-from fusion import Direction, FusionAction, FusionResult
+from core.fusion import Direction, FusionAction, FusionResult
 
 # ---------------------------------------------------------------------------
 # Centralized Natural-Language Voice Formatting
@@ -95,11 +95,13 @@ class AudioOutput:
         self._closed = False
 
         try:
-            from eleven_audio import ElevenLabsVoice
+            import eleven_audio
 
-            voice = ElevenLabsVoice()
-            if voice.is_available:
-                self._eleven = voice
+            voice_cls = getattr(eleven_audio, "ElevenLabsVoice", None)
+            if callable(voice_cls):
+                voice = voice_cls()
+                if getattr(voice, "is_available", False):
+                    self._eleven = voice
         except Exception as exc:
             print(f"[AudioOutput] ElevenLabs unavailable: {exc}")
 

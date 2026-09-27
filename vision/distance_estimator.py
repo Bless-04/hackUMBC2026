@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import List
 
-from fusion import Detection
+from core.fusion import Detection
 
 # Approximate typical physical heights of objects in metres
 TYPICAL_HEIGHT_M: dict[str, float] = {

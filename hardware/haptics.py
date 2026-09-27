@@ -8,7 +8,7 @@ import struct
 import threading
 import wave
 
-from audio_playback import play_wav_bytes
+from hardware.audio_playback import play_wav_bytes
 
 TONE_HZ = 880
 TONE_DURATION_SEC = 0.20

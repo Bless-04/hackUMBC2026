@@ -11,13 +11,14 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock
 
-from fusion import (
+import core._compat  # noqa: F401 - registers backward compatibility aliases
+from core.fusion import (
     Detection,
     FusionAction,
     FusionEngine,
     SensorFrame,
 )
-from state_machine import HardwareInterface, StateMachine, SystemState
+from core.state_machine import HardwareInterface, StateMachine, SystemState
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -458,7 +459,6 @@ class TestGuideSenseHUD(unittest.TestCase):
 
     def setUp(self):
         import numpy as np
-
         from hud import GuideSenseHUD
         self.np = np
         self.hud = GuideSenseHUD(features={

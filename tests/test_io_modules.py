@@ -11,8 +11,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from fusion import Detection, FusionAction, FusionResult, SensorFrame, Zone
-from state_machine import SystemState
+from core.fusion import Detection, FusionAction, FusionResult, SensorFrame, Zone
+from core.state_machine import SystemState
 
 
 def test_vision_converts_filters_clamps_and_ranks(monkeypatch, tmp_path):
