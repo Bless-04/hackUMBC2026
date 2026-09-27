@@ -120,16 +120,6 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault(); fullscreen();
   }
 });
-$("export-button").addEventListener("click", async () => {
-  try {
-    const response = await fetch("/api/export", { signal: AbortSignal.timeout(4000) });
-    if (!response.ok) throw new Error("Could not download session activity.");
-    const url = URL.createObjectURL(await response.blob());
-    const link = document.createElement("a");
-    link.href = url; link.download = `guidesense-activity-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-  } catch { toast("Could not download activity. Check the server connection."); }
-});
 
 function render(data) {
   const running = data.status === "running";
@@ -139,6 +129,7 @@ function render(data) {
   const distance = data.distance;
   const detections = running ? data.detections : [];
   $("mode-label").textContent = demo ? "Demo environment" : `Live camera ${settings.camera}`;
+  $("processing-label").textContent = demo ? "Simulated demo · no model inference" : "Object detection runs locally · MobileNet-SSD";
   $("summary-status").textContent = ({ idle: "Ready to explore", starting: "Preparing session", running: demo ? "Demo in progress" : "Session in progress", stopping: "Ending session", stopped: "Session complete", error: "Needs attention" })[data.status] || "Standby";
   $("metric-fps").textContent = running ? data.fps.toFixed(1) : "—";
   $("metric-objects").textContent = running ? detections.length : "—";
@@ -162,7 +153,7 @@ function render(data) {
   $("stage-start").hidden = !!active();
   $("stage-start").innerHTML = `${demo ? "Explore demo" : "Connect camera"} <svg><use href="#i-arrow"/></svg>`;
   $("awareness-card").dataset.state = valid ? data.state : "SILENT";
-  $("state-tag").textContent = !valid ? "AWAITING SESSION" : data.state === "URGENT" ? "NEAR OBJECT · URGENT" : data.state === "INFORMATIVE" ? "OBJECT IN RANGE" : "MONITORING SURROUNDINGS";
+  $("state-tag").textContent = !valid ? running ? "AWAITING CAMERA DATA" : "AWAITING SESSION" : data.state === "URGENT" ? "NEAR OBJECT · URGENT" : data.state === "INFORMATIVE" ? "OBJECT IN RANGE" : "MONITORING SURROUNDINGS";
   $("distance-value").textContent = valid ? distance.toFixed(2) : "—";
   $("distance-caption").textContent = !valid ? "Waiting for distance data" : demo ? "Simulated distance · demonstration" : detections.length ? "Nearest object · camera estimate" : "No detection · fallback estimate";
   $("zone-marker").hidden = !valid;

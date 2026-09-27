@@ -5,6 +5,16 @@
 
 ---
 
+## Browser Dashboard
+
+Run `python -m ui` from the repository root, then open **http://127.0.0.1:8765**.
+The new dashboard lives in [`ui/`](ui/README.md) and includes a hardware-free demo,
+live camera detections, distance/alert status, optional AI/voice controls, and
+exportable session activity. Start in demo mode, or choose **Configure → Live camera**
+to test your Logitech webcam. The existing CLI and `vision.py` are unchanged.
+
+See the [dashboard setup and hardware success checklist](ui/README.md) for details.
+
 ## Table of Contents
 1. [System Architecture & Hardware Setup](#1-system-architecture--hardware-setup)
 2. [Team Ownership Matrix](#2-team-ownership-matrix)
