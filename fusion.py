@@ -11,7 +11,7 @@ Rule priority (in order):
   4. FAR   → SILENT.
   5. Multi-object tie-break: highest priority label wins.
 
-Data contract (shared with vision + ultrasonic teams):
+Data contract (shared with the vision and distance modules):
   Detection(label: str, confidence: float, bbox: tuple[int,int,int,int], timestamp: float)
   distance: float  — metres
   timestamp: float — time.monotonic() seconds
@@ -91,7 +91,7 @@ class Detection:
 @dataclass
 class SensorFrame:
     """One complete sensor snapshot delivered to the fusion engine each tick."""
-    distance_m: float                   # metres, from ultrasonic or camera distance
+    distance_m: float                   # metres, estimated from the camera
     detections: list[Detection]         # may be empty
     timestamp: float = field(default_factory=time.monotonic)
     frame_width: int = 640              # resolution width for spatial awareness
@@ -114,7 +114,7 @@ class Zone(Enum):
 class FusionAction(Enum):
     SILENT      = auto()
     INFORMATIVE = auto()   # announce label once
-    URGENT      = auto()   # trigger buzzer / voice alert
+    URGENT      = auto()   # trigger tone / voice alert
 
 
 @dataclass
@@ -134,15 +134,17 @@ class FusionResult:
 
 OBJECT_PRIORITY: dict[str, int] = {
     "person":       10,
-    "bicycle":       8,
-    "motorcycle":    8,
-    "car":           7,
-    "dog":           6,
+    "animal":        7,   # indoor pets/animals
+    "dog":           6,   # alias retained
+    "cat":           6,   # alias retained
     "chair":         5,
     "dining table":  4,
     "couch":         4,
     "bed":           3,
     "toilet":        3,
+    "bottle":        2,
+    "potted plant":  2,
+    "tv":            2,
     # anything else defaults to 1  (see _priority())
 }
 

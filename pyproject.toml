@@ -4,12 +4,10 @@ version = "0.1.0"
 description = "Chest-worn navigation aid decision core for low-vision users"
 requires-python = ">=3.10"
 
-# Runtime dependencies. Raspberry Pi GPIO remains optional because its package
-# cannot be installed on ordinary CI and development machines.
+# Camera inference, optional memory, and local speech dependencies.
 dependencies = [
     "backboard-sdk>=1.5.0",
     "opencv-python>=4.8,<5.0",
-    "pyserial>=3.5",
     "pyttsx3>=2.90",
 ]
 

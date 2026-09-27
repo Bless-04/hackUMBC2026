@@ -1,45 +1,8 @@
-"""
-main.py — GuideSense Integration Entry Point
-=============================================
-Wires all three tracks together:
+"""GuideSense command-line sensing loop for a USB camera on any desktop OS.
 
-  [CE freshman]   serial_reader.SerialDistanceReader  → distance_m
-  [IT freshman]   vision.VisionReader                → list[Detection]
-  [IT freshman]   audio.AudioOutput  \
-  [IT freshman]   haptics.HapticOutput > → HardwareInterface
-  [IT freshman]   logger.EventLogger  /
-
-  [Senior]        fusion.FusionEngine + state_machine.StateMachine
-
----------------------------------------------------------------------------
-RUNNING MODES
----------------------------------------------------------------------------
-
-  1. Mock mode (no hardware needed — runs right now):
-       python -X utf8 main.py
-
-  2. Real hardware mode (after teammates hand off their modules):
-       python -X utf8 main.py --real
-
-     The --real flag swaps MockDistanceReader → SerialDistanceReader
-     and MockVisionReader → VisionReader automatically.
-     No changes to fusion.py or state_machine.py needed.
-
-  3. Partial mode (e.g. real distance but mock vision):
-       python -X utf8 main.py --real-distance
-       python -X utf8 main.py --real-vision
-
----------------------------------------------------------------------------
-INTEGRATION CHECKLIST (senior fills this in at handoff time)
----------------------------------------------------------------------------
-  [ ] CE freshman's serial_reader.py: read() returns float in metres
-  [ ] IT freshman's vision.py:        read() returns list[Detection]
-  [ ] IT freshman's audio.py:         speak() fires TTS non-blocking
-  [ ] IT freshman's haptics.py:       buzzer_on()/off() agreed protocol with CE
-  [ ] Serial port matches: SERIAL_PORT in serial_reader.py == haptics.py
-  [ ] Label strings from vision.py match fusion.py OBJECT_PRIORITY keys
-  [ ] Run --real for 30 s, verify CSV log looks correct
-  [ ] Run test suite: python -X utf8 -m pytest
+Default mode is simulated. Camera mode uses OpenCV detections and estimates
+distance from bounding boxes. Optional speech and urgent tones use the
+computer's selected audio output.
 """
 
 from __future__ import annotations
@@ -50,52 +13,35 @@ import time
 from fusion import Detection, FusionAction, FusionEngine, SensorFrame
 from state_machine import HardwareInterface, StateMachine
 
-# ---------------------------------------------------------------------------
-# Tick rate
-# ---------------------------------------------------------------------------
-
-TICK_HZ      = 10
+TICK_HZ = 10
 TICK_INTERVAL = 1.0 / TICK_HZ
 
 
-# ---------------------------------------------------------------------------
-# Composite HardwareInterface — wraps audio.py + haptics.py
-# ---------------------------------------------------------------------------
-
 class CompositeHardwareInterface(HardwareInterface):
-    """
-    Bridges the state_machine's hardware calls to the IT freshman's modules.
-    This is the only place senior code touches audio/haptics directly.
-    """
+    """Connect state machine announcements to system speech and alert output."""
 
-    def __init__(self, audio, haptic) -> None:
-        self._audio  = audio
-        self._haptic = haptic
+    def __init__(self, audio, alert) -> None:
+        self._audio = audio
+        self._alert = alert
 
     def speak(self, text: str) -> None:
         self._audio.speak(text)
 
     def buzzer_on(self) -> None:
-        self._haptic.buzzer_on()
+        self._alert.buzzer_on()
 
     def buzzer_off(self) -> None:
-        self._haptic.buzzer_off()
+        self._alert.buzzer_off()
 
+    def close(self) -> None:
+        if hasattr(self._alert, "cleanup"):
+            self._alert.cleanup()
+        if hasattr(self._audio, "close"):
+            self._audio.close()
 
-# ---------------------------------------------------------------------------
-# Mock sensor readers (used when real hardware is not available)
-# ---------------------------------------------------------------------------
 
 class MockDistanceReader:
-    """
-    Simulates a person walking toward then away from the device.
-
-    Profile (~8 s at 10 Hz):
-      0–3 s   : 4.0 m (far, silent)
-      3–5 s   : 4.0→1.2 m (mid, informative zone)
-      5–6 s   : 1.2→0.4 m (near, URGENT)
-      6–8 s   : 0.4→3.5 m (clearing, hysteresis then silent)
-    """
+    """Simulate an approach and retreat for development without a camera."""
 
     _PROFILE = [
         (0.0, 3.0, 4.0, 4.0),
@@ -111,35 +57,27 @@ class MockDistanceReader:
         elapsed = time.monotonic() - self._start
         for t0, t1, d0, d1 in self._PROFILE:
             if elapsed <= t1:
-                t = max(elapsed, t0)
-                frac = (t - t0) / (t1 - t0)
-                return d0 + (d1 - d0) * frac
+                fraction = (max(elapsed, t0) - t0) / (t1 - t0)
+                return d0 + (d1 - d0) * fraction
         return 3.5
 
 
 class MockVisionReader:
-    """
-    Flickering detections to exercise all fusion gates.
-      person: ticks 3–8 s (continuous)
-      chair:  ticks 3–5 s (every other tick — tests persistence gate)
-    """
+    """Create intermittent test detections for the simulated mode."""
 
     def __init__(self) -> None:
         self._start = time.monotonic()
-        self._tick  = 0
+        self._tick = 0
 
     def read(self) -> list[Detection]:
         elapsed = time.monotonic() - self._start
         self._tick += 1
-        dets: list[Detection] = []
-
+        detections = []
         if 3.0 <= elapsed <= 8.0:
-            dets.append(Detection("person", 0.85, (100, 80, 400, 460)))
-
+            detections.append(Detection("person", 0.85, (100, 80, 400, 460)))
         if 3.0 <= elapsed <= 5.0 and self._tick % 2 == 0:
-            dets.append(Detection("chair", 0.72, (50, 200, 280, 460)))
-
-        return dets
+            detections.append(Detection("chair", 0.72, (50, 200, 280, 460)))
+        return detections
 
     @property
     def latest_frame(self):
@@ -148,172 +86,109 @@ class MockVisionReader:
 
 class MockAudioOutput:
     def speak(self, text: str) -> None:
-        print(f"[TTS]     '{text}'")
+        print(f"[TTS] {text}")
 
 
 class MockHapticOutput:
-    def buzzer_on(self)  -> None: print("[BUZZER]  *** ON ***")
-    def buzzer_off(self) -> None: print("[BUZZER]  --- off ---")
-    def cleanup(self)    -> None: pass
+    def buzzer_on(self) -> None:
+        print("[ALERT] ON")
+
+    def buzzer_off(self) -> None:
+        print("[ALERT] OFF")
+
+    def cleanup(self) -> None:
+        pass
 
 
-# ---------------------------------------------------------------------------
-# Module loader — gracefully falls back to mocks if real module not ready
-# ---------------------------------------------------------------------------
+def _load_output(enable_audio: bool) -> CompositeHardwareInterface:
+    if not enable_audio:
+        return CompositeHardwareInterface(MockAudioOutput(), MockHapticOutput())
+    from audio import AudioOutput
+    from haptics import HapticOutput
 
-def _load_distance_reader(use_real: bool):
-    if use_real:
-        try:
-            from serial_reader import SerialDistanceReader
-            reader = SerialDistanceReader()
-            print("[main] Using REAL SerialDistanceReader")
-            return reader
-        except Exception as e:
-            print(f"[main] WARNING: SerialDistanceReader failed ({e}), falling back to mock")
-    return MockDistanceReader()
+    audio = AudioOutput()
+    try:
+        alert = HapticOutput()
+    except Exception:
+        audio.close()
+        raise
+    return CompositeHardwareInterface(audio, alert)
 
-
-def _load_vision_reader(use_real: bool, camera_index: int = 0, show_preview: bool = False):
-    if use_real:
-        try:
-            from vision import VisionReader
-            reader = VisionReader(camera_index=camera_index, show_preview=show_preview)
-            print(f"[main] Using REAL VisionReader (camera={camera_index}, preview={show_preview})")
-            return reader
-        except Exception as e:
-            print(f"[main] WARNING: VisionReader failed ({e}), falling back to mock")
-    return MockVisionReader()
-
-
-def _load_hardware(use_real: bool) -> HardwareInterface:
-    if use_real:
-        try:
-            from audio import AudioOutput
-            from haptics import HapticOutput
-            audio  = AudioOutput()
-            haptic = HapticOutput()
-            print("[main] Using REAL AudioOutput + HapticOutput")
-            return CompositeHardwareInterface(audio, haptic)
-        except Exception as e:
-            print(f"[main] WARNING: Real hardware failed ({e}), falling back to mock")
-    return CompositeHardwareInterface(MockAudioOutput(), MockHapticOutput())
-
-
-def _load_logger(enabled: bool):
-    if enabled:
-        try:
-            from logger import EventLogger
-            return EventLogger()
-        except Exception as e:
-            print(f"[main] WARNING: Logger failed ({e}), running without logging")
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Main loop
-# ---------------------------------------------------------------------------
 
 def run(
-    use_real_distance:   bool = False,
-    use_camera_distance: bool = False,
-    use_real_vision:     bool = False,
-    use_real_hardware:   bool = False,
-    camera_index:        int = 0,
-    show_preview:        bool = False,
-    enable_gemini:       bool = False,
-    enable_backboard:    bool = False,
-    enable_logging:      bool = True,
-    enable_gui:          bool = False,
-    duration_sec:        float = 10.0,
-    verbose:             bool = True,
+    use_camera: bool = False,
+    enable_audio: bool = False,
+    camera_index: int = 0,
+    enable_gemini: bool = False,
+    enable_backboard: bool = False,
+    enable_logging: bool = True,
+    enable_gui: bool = False,
+    duration_sec: float = 10.0,
+    verbose: bool = True,
 ) -> None:
-    """
-    Main sensing loop.  All arguments default to mock/safe mode.
-
-    Args:
-        use_real_distance   : Use serial_reader.SerialDistanceReader instead of mock.
-        use_camera_distance : Use camera bounding box height to estimate distance.
-        use_real_vision     : Use vision.VisionReader instead of mock.
-        use_real_hardware   : Use audio.AudioOutput + haptics.HapticOutput instead of mock.
-        camera_index        : Webcam device index (default: 0, try 1 for external Logitech C270).
-        show_preview        : Display live GUI window with bounding boxes & detected object labels.
-        enable_gemini       : Use Google Gemini for contextual scene audio descriptions.
-        enable_backboard    : Use Backboard.io for persistent spatial & session memory.
-        enable_logging      : Write events to CSV via logger.EventLogger.
-        enable_gui          : Display live OpenCV visual HUD overlay.
-        duration_sec        : Seconds to run (0 = forever).
-        verbose             : Print per-tick trace to stdout.
-    """
-    # If HUD is active, disable VisionReader's internal preview to avoid duplicate windows
-    actual_preview = show_preview and not enable_gui
-    vision_reader = _load_vision_reader(
-        use_real_vision, camera_index=camera_index, show_preview=actual_preview
-    )
-
-    if use_camera_distance:
-        from distance_estimator import CameraDistanceEstimator
-        cam_dist_estimator = CameraDistanceEstimator()
-        distance_reader = None
-        print("[main] Using CAMERA BOUNDING-BOX DISTANCE ESTIMATOR (no physical ultrasonic needed)")
-    else:
-        cam_dist_estimator = None
-        distance_reader = _load_distance_reader(use_real_distance)
-
-    hw     = _load_hardware(use_real_hardware)
-    logger = _load_logger(enable_logging)
-
-    gemini_narrator = None
-    if enable_gemini:
-        from gemini_narrator import GeminiNarrator
-        gemini_narrator = GeminiNarrator()
-        if gemini_narrator.is_available:
-            print("[main] Google Gemini Multimodal Scene Narrator ACTIVE")
-        else:
-            print("[main] WARNING: Gemini requested but API key not available")
-
-    backboard = None
-    if enable_backboard:
-        from backboard_memory import BackboardMemory
-        backboard = BackboardMemory()
-        print("[main] Backboard.io Persistent Navigation Memory ACTIVE")
-
-    hud = None
-    if enable_gui:
-        try:
-            from hud import GuideSenseHUD
-            cam_mode = "Real" if use_real_vision else ("Camera-Dist" if use_camera_distance else "Mock")
-            ard_mode = "Real" if use_real_distance else "Mock"
-            features_status = {
-                "Camera": cam_mode,
-                "Arduino": ard_mode,
-                "Gemini": "Active" if (gemini_narrator and gemini_narrator.is_available) else "Off",
-                "Backboard": "Active" if backboard else "Off",
-                "Logging": "Active" if logger else "Off",
-            }
-            hud = GuideSenseHUD(features=features_status)
-            print("[main] GuideSense Live Visual HUD ACTIVE")
-        except Exception as e:
-            print(f"[main] WARNING: Could not initialize HUD: {e}")
-
-    engine = FusionEngine()
-    sm     = StateMachine(hw=hw)
-    start  = time.monotonic()
-
-    print("=" * 60)
-    print("GuideSense — running")
-    print("=" * 60)
-
+    """Run detection and guidance; ``use_camera`` selects the live USB webcam."""
+    vision_reader = output = logger = hud = None
     try:
+        if use_camera:
+            from distance_estimator import CameraDistanceEstimator
+            from vision import VisionReader
+
+            vision_reader = VisionReader(camera_index=camera_index)
+            estimator = CameraDistanceEstimator()
+            distance_reader = None
+            print(f"[main] Using live camera {camera_index} and camera distance estimation")
+        else:
+            vision_reader = MockVisionReader()
+            distance_reader = MockDistanceReader()
+            estimator = None
+            print("[main] Using simulated camera and distance")
+
+        output = _load_output(enable_audio)
+        if enable_logging:
+            from logger import EventLogger
+
+            logger = EventLogger()
+
+        narrator = None
+        if enable_gemini and use_camera:
+            from gemini_narrator import GeminiNarrator
+
+            narrator = GeminiNarrator()
+        memory = None
+        if enable_backboard and use_camera:
+            from backboard_memory import BackboardMemory
+
+            memory = BackboardMemory()
+
+        if enable_gui:
+            from hud import GuideSenseHUD
+
+            hud = GuideSenseHUD(features={
+                "Camera": f"Live {camera_index}" if use_camera else "Demo",
+                "Gemini": "Active" if narrator and narrator.is_available else "Off",
+                "Backboard": "Active" if memory else "Off",
+                "Logging": "Active" if logger else "Off",
+            })
+
+        engine = FusionEngine()
+        machine = StateMachine(output)
+        start = time.monotonic()
+        print("GuideSense running. Press Ctrl+C to stop.")
+
         while True:
             now = time.monotonic()
-            if duration_sec > 0 and (now - start) >= duration_sec:
+            if duration_sec > 0 and now - start >= duration_sec:
                 break
 
             detections = vision_reader.read()
-
-            if cam_dist_estimator is not None:
-                cam_dist_estimator.update_detections(detections)
-                distance_m = cam_dist_estimator.read()
+            image = vision_reader.latest_frame
+            width = 640
+            if estimator is not None:
+                if image is not None:
+                    height, width = image.shape[:2]
+                    estimator.frame_height = height
+                estimator.update_detections(detections)
+                distance_m = estimator.read()
             else:
                 distance_m = distance_reader.read()
 
@@ -321,119 +196,80 @@ def run(
                 distance_m=distance_m,
                 detections=detections,
                 timestamp=now,
+                frame_width=width,
             )
-
             result = engine.process(frame)
-            state  = sm.update(result)
+            state = machine.update(result)
 
-            frame_img = getattr(vision_reader, "latest_frame", None)
-
-            # Render live visual HUD if enabled
             if hud is not None:
-                hud_action = hud.render(
-                    frame_img=frame_img,
-                    frame=frame,
-                    result=result,
-                    state=state,
-                )
-                if hud_action == "QUIT":
-                    print("\n[main] GUI Quit requested by user.")
+                action = hud.render(frame_img=image, frame=frame, result=result, state=state)
+                if action == "QUIT":
                     break
 
-            # Trigger Gemini Scene Narrator asynchronously on new confirmed objects
-            if gemini_narrator and result.action == FusionAction.INFORMATIVE and result.label:
-                img_bytes = None
-                if frame_img is not None:
-                    try:
-                        import cv2
-                        ok, buf = cv2.imencode(".jpg", frame_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-                        if ok:
-                            img_bytes = buf.tobytes()
-                    except Exception:
-                        img_bytes = None
+            if narrator and result.action == FusionAction.INFORMATIVE and result.label:
+                image_bytes = None
+                if image is not None:
+                    import cv2
 
-                gemini_narrator.describe_scene_async(
-                    image_bytes=img_bytes,
+                    ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    if ok:
+                        image_bytes = encoded.tobytes()
+                narrator.describe_scene_async(
+                    image_bytes=image_bytes,
                     label=result.label,
                     distance_m=distance_m,
-                    on_complete=hw.speak,
+                    on_complete=output.speak,
                 )
 
-            # Record confirmed objects into Backboard persistent spatial memory
-            if backboard and result.action == FusionAction.INFORMATIVE and result.label:
-                backboard.record_observation(
-                    label=result.label,
-                    distance_m=distance_m,
-                )
-
-            if distance_reader is not None and hasattr(distance_reader, "send_state"):
-                distance_reader.send_state(state.name)
-
-            if logger:
+            if memory and result.action == FusionAction.INFORMATIVE and result.label:
+                memory.record_observation(label=result.label, distance_m=distance_m)
+            if logger is not None:
                 logger.log_event(frame, result, state)
-
             if verbose:
-                det_str = ", ".join(
-                    f"{d.label}({d.confidence:.2f})" for d in detections
-                ) or "—"
-                print(
-                    f"t={now - start:5.2f}s  dist={distance_m:.2f}m  "
-                    f"dets=[{det_str}]  "
-                    f"fusion={result.action.name:<12}  state={state.name}"
-                )
+                detected = ", ".join(f"{d.label}({d.confidence:.2f})" for d in detections) or "—"
+                print(f"t={now - start:5.2f}s  dist={distance_m:.2f}m  "
+                      f"dets=[{detected}]  fusion={result.action.name:<12}  state={state.name}")
 
-            elapsed = time.monotonic() - now
-            time.sleep(max(0.0, TICK_INTERVAL - elapsed))
-
+            time.sleep(max(0.0, TICK_INTERVAL - (time.monotonic() - now)))
     finally:
-        # Always clean up hardware, GUI window, and flush log on exit/error
         if hud is not None:
             hud.close()
-        if hasattr(hw, '_haptic') and hasattr(hw._haptic, 'cleanup'):
-            hw._haptic.cleanup()
-        if hasattr(vision_reader, 'close'):
+        if output is not None:
+            output.close()
+        if vision_reader is not None and hasattr(vision_reader, "close"):
             vision_reader.close()
-        if logger:
+        if logger is not None:
             logger.close()
-
-    print("=" * 60)
-    print("GuideSense — stopped")
-    print("=" * 60)
+        print("GuideSense stopped.")
 
 
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="GuideSense navigation aid")
-    parser.add_argument("--real",            action="store_true", help="Use all real hardware modules")
-    parser.add_argument("--camera-distance", action="store_true", help="Estimate distance using camera bounding boxes (no ultrasonic sensor)")
-    parser.add_argument("--camera",          type=int, default=0, help="Webcam device index (default: 0, try 1 for external Logitech C270)")
-    parser.add_argument("--preview",         action="store_true", help="Display live camera window with bounding boxes and detected object labels")
-    parser.add_argument("--gemini",          action="store_true", help="Enable Google Gemini multimodal contextual scene description")
-    parser.add_argument("--backboard",       action="store_true", help="Enable Backboard.io persistent spatial navigation memory")
-    parser.add_argument("--real-distance",   action="store_true", help="Use real serial distance reader only")
-    parser.add_argument("--real-vision",     action="store_true", help="Use real camera/detector only")
-    parser.add_argument("--gui",             action="store_true", help="Display live visual HUD window overlay")
-    parser.add_argument("--no-log",          action="store_true", help="Disable CSV event logging")
-    parser.add_argument("--forever",         action="store_true", help="Run indefinitely (Ctrl-C to stop)")
-    parser.add_argument("--duration",        type=float, default=10.0, help="Run duration in seconds (default 10)")
+def main() -> None:
+    parser = argparse.ArgumentParser(description="GuideSense camera guidance")
+    parser.add_argument("--camera-distance", action="store_true", help="Use live camera and camera estimated distance")
+    parser.add_argument("--real-vision", action="store_true", help="Alias for --camera-distance")
+    parser.add_argument("--real", action="store_true", help="Use live camera plus system speech and alert tone")
+    parser.add_argument("--audio", action="store_true", help="Enable system speech and urgent tone")
+    parser.add_argument("--camera", type=int, default=0, help="USB camera index (usually 0 or 1)")
+    parser.add_argument("--preview", action="store_true", help="Display the live visual HUD")
+    parser.add_argument("--gui", action="store_true", help="Display the live visual HUD")
+    parser.add_argument("--gemini", action="store_true", help="Enable contextual Gemini narration")
+    parser.add_argument("--backboard", action="store_true", help="Enable optional Backboard memory")
+    parser.add_argument("--no-log", action="store_true", help="Disable CSV event logging")
+    parser.add_argument("--forever", action="store_true", help="Run until Ctrl+C")
+    parser.add_argument("--duration", type=float, default=10.0, help="Run duration in seconds")
     args = parser.parse_args()
 
-    use_gui = args.gui or args.preview
-
     run(
-        use_real_distance   = args.real or args.real_distance,
-        use_camera_distance = args.camera_distance,
-        use_real_vision     = args.real or args.real_vision or args.camera_distance or use_gui,
-        use_real_hardware   = args.real,
-        camera_index        = args.camera,
-        show_preview        = False,  # HUD handles the display cleanly
-        enable_gemini       = args.gemini,
-        enable_backboard    = args.backboard,
-        enable_logging      = not args.no_log,
-        enable_gui          = use_gui,
-        duration_sec        = 0.0 if args.forever else args.duration,
-        verbose             = True,
+        use_camera=args.real or args.real_vision or args.camera_distance or args.gui or args.preview,
+        enable_audio=args.real or args.audio,
+        camera_index=args.camera,
+        enable_gemini=args.gemini,
+        enable_backboard=args.backboard,
+        enable_logging=not args.no_log,
+        enable_gui=args.gui or args.preview,
+        duration_sec=0.0 if args.forever else args.duration,
     )
+
+
+if __name__ == "__main__":
+    main()

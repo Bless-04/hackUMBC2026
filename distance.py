@@ -8,8 +8,7 @@ Formula:
   distance_cm = (real_height_cm * FOCAL_LENGTH_PX) / bbox_height_px
   distance_m  = distance_cm / 100.0
 
-This module replaces the physical ultrasonic sensor when hardware is constrained,
-providing a drop-in distance value (metres) for the SensorFrame consumed by FusionEngine.
+Provides a distance estimate (metres) for the SensorFrame consumed by FusionEngine.
 """
 
 from __future__ import annotations
@@ -48,6 +47,15 @@ OBJECT_HEIGHTS_CM: dict[str, float] = {
     "train": 350.0,
     "boat": 150.0,
     "airplane": 300.0,
+
+    # Animals & Indoor Pets
+    "animal": 55.0,
+    "dog": 60.0,
+    "cat": 30.0,
+    "bird": 20.0,
+    "horse": 160.0,
+    "sheep": 80.0,
+    "cow": 140.0,
 
     # Indoor Furniture & Household
     "chair": 85.0,
@@ -149,7 +157,7 @@ def enrich_detections(
     for each detected object from its bounding box height, and returns the MINIMUM
     distance across all detections.
 
-    This single number replaces the physical ultrasonic sensor reading in SensorFrame.distance_m.
+    This estimate becomes SensorFrame.distance_m.
 
     Args:
         detections: List of Detection instances from the vision reader.

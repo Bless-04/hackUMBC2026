@@ -197,7 +197,6 @@ class SessionController:
             hud = GuideSenseHUD(
                 features={
                     "Camera": services.get("camera", "Active"),
-                    "Arduino": "Mock",
                     "Gemini": services.get("gemini", "Off"),
                     "Backboard": services.get("backboard", "Off"),
                     "Logging": services.get("logging", "Off"),

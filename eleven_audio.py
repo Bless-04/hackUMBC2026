@@ -2,14 +2,13 @@
 eleven_audio.py — Ultra-Realistic Voice Output via ElevenLabs API
 ==================================================================
 Provides human-like, natural voice output for GuideSense via ElevenLabs.
-Outputs speech through the connected JBL speaker.
+Outputs speech through the computer's selected audio device.
 
 Features:
   - Uses the ultra-low latency model: `eleven_flash_v2_5`.
   - Uses the pre-made voice ID: `JBFqnCBsd6RMkjVDRZzb` (George).
-  - Audio Format: WAV (PCM 24kHz) for zero-dependency native playback:
-      - Windows: native `winsound.PlaySound`
-      - Linux / Raspberry Pi: native `aplay`
+  - Audio Format: WAV (PCM 24kHz) for system playback on Windows, macOS,
+    and Linux.
   - Fallback: Gracefully falls back to local pyttsx3 or terminal log if offline or rate limited.
   - Non-blocking: Generates and plays audio in a background daemon thread so it
     NEVER stalls the 10 Hz local safety loop.
@@ -20,14 +19,13 @@ from __future__ import annotations
 import io
 import json
 import os
-import platform
-import subprocess
-import tempfile
 import threading
 import urllib.error
 import urllib.request
 import wave
 from typing import Callable, Optional
+
+from audio_playback import play_wav_bytes
 
 # ElevenLabs configuration
 DEFAULT_VOICE_ID = "XrExE9yKIg1WjnnlVkGX"  # Maltida
@@ -126,32 +124,9 @@ class ElevenLabsVoice:
 
         return None
 
-    def play_wav(self, wav_bytes: bytes) -> None:
-        """
-        Plays WAV audio through system output (JBL speaker).
-        Uses native OS utilities (winsound on Windows, aplay on Linux/Pi).
-        """
-        is_windows = platform.system() == "Windows"
-
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            f.write(wav_bytes)
-            tmp_path = f.name
-
-        try:
-            if is_windows:
-                try:
-                    import winsound
-                    winsound.PlaySound(tmp_path, winsound.SND_FILENAME)
-                except Exception as e:
-                    print(f"[ElevenLabsVoice] Windows audio playback error: {e}")
-            else:
-                # Linux / Raspberry Pi: native ALSA player
-                subprocess.run(["aplay", "-q", tmp_path], check=False)
-        finally:
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
+    def play_wav(self, wav_bytes: bytes) -> bool:
+        """Play speech through the selected system audio device."""
+        return play_wav_bytes(wav_bytes)
 
     def speak(self, text: str) -> bool:
         """
@@ -159,8 +134,7 @@ class ElevenLabsVoice:
         """
         wav_bytes = self.generate_wav(text)
         if wav_bytes:
-            self.play_wav(wav_bytes)
-            return True
+            return self.play_wav(wav_bytes)
         return False
 
     def speak_async(self, text: str, on_done: Optional[Callable[[], None]] = None) -> bool:
@@ -192,6 +166,6 @@ if __name__ == "__main__":
     if not voice.is_available:
         print("Please set ELEVEN_LABS_API_KEY in .env before running.")
     else:
-        print("Speaking via ElevenLabs through JBL speaker...")
+        print("Speaking via ElevenLabs through the system audio output...")
         voice.speak("Hello! I am GuideSense, powered by Gemini and ElevenLabs.")
         print("Done.")

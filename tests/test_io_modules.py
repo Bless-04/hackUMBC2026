@@ -6,6 +6,7 @@ import csv
 import sys
 import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -120,30 +121,62 @@ def test_audio_queues_speech_on_one_worker(monkeypatch):
     assert spoken == ["person"]
 
 
-def test_serial_haptics_are_idempotent_and_do_not_close_shared_connection():
-    class FakeSerial:
-        def __init__(self):
-            self.writes: list[bytes] = []
-            self.closed = False
+def test_system_audio_alert_is_idempotent_and_stops(monkeypatch):
+    import haptics
 
-        def write(self, payload):
-            self.writes.append(payload)
-
-        def close(self):
-            self.closed = True
-
-    from haptics import HapticOutput
-
-    serial = FakeSerial()
-    output = HapticOutput(mode="serial", serial_connection=serial)
+    played = threading.Event()
+    monkeypatch.setattr(haptics, "play_wav_bytes", lambda *_args, **_kwargs: played.set() or True)
+    output = haptics.HapticOutput()
     output.buzzer_on()
+    worker = output._thread
     output.buzzer_on()
+    assert played.wait(1.0)
+    assert output._thread is worker
+    assert output.is_active
     output.buzzer_off()
     output.buzzer_off()
     output.cleanup()
+    output.cleanup()
 
-    assert serial.writes == [b"BUZZ_ON\n", b"BUZZ_OFF\n"]
-    assert not serial.closed
+    assert not output.is_active
+    assert not worker.is_alive()
+
+
+def test_system_wav_playback_on_windows(monkeypatch):
+    from audio_playback import play_wav_bytes
+
+    calls = []
+    monkeypatch.setattr("audio_playback.platform.system", lambda: "Windows")
+    monkeypatch.setitem(sys.modules, "winsound", SimpleNamespace(
+        SND_MEMORY=4, PlaySound=lambda data, flags: calls.append((data, flags))))
+    assert play_wav_bytes(b"RIFF-test")
+    assert calls == [(b"RIFF-test", 4)]
+
+
+def test_system_wav_playback_on_macos_and_linux(monkeypatch):
+    import audio_playback
+    from audio_playback import play_wav_bytes
+
+    commands = []
+    monkeypatch.setattr(audio_playback.subprocess, "run", lambda command, **_kwargs:
+                        commands.append(command) or SimpleNamespace(returncode=0))
+    for system, player, expected in [("Darwin", "afplay", "afplay"),
+                                     ("Linux", "paplay", "paplay"),
+                                     ("Linux", "aplay", "aplay")]:
+        monkeypatch.setattr(audio_playback.platform, "system", lambda value=system: value)
+        monkeypatch.setattr(audio_playback.shutil, "which",
+                            lambda name, chosen=player: f"/usr/bin/{name}" if name == chosen else None)
+        assert play_wav_bytes(b"RIFF-test")
+        assert expected in commands[-1][0]
+        assert not Path(commands[-1][-1]).exists()
+
+
+def test_unavailable_system_player_allows_speech_fallback(monkeypatch):
+    import audio_playback
+
+    monkeypatch.setattr(audio_playback.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(audio_playback.shutil, "which", lambda _name: None)
+    assert not audio_playback.play_wav_bytes(b"RIFF-test")
 
 
 def test_logger_appends_without_repeating_header(tmp_path):

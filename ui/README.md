@@ -1,7 +1,7 @@
 # GuideSense dashboard
 
 A local browser interface for the existing GuideSense application. All UI code
-lives here; `vision.py` and the original CLI/OpenCV HUD remain unchanged.
+lives here and reads the same OpenCV detections as the command line app.
 No Node.js, frontend build, external fonts, or new runtime dependencies are required.
 
 ## Launch
@@ -19,8 +19,8 @@ python -m ui --port 8766
 ```
 
 On Windows without activating the environment, run `.venv\Scripts\python.exe -m ui`.
-On Raspberry Pi, run the server and browser on the Pi. The server binds to
-loopback only: it is not exposed to other devices on your network.
+Run the server and browser on the computer with the Logitech camera. The server
+binds to loopback only; it is not exposed to other devices on your network.
 
 ## Try the demo first
 
@@ -47,9 +47,10 @@ dashboard to standby. Demo mode never opens hardware, plays sound, or calls clou
 4. Test at a desk with supervision. Change the apparent object size in the frame.
    The distance estimate and near/mid/far indicators should change. Monocular
    distance is a rough heuristic, **not calibrated ranging or a safety guarantee**.
-5. End the session before changing settings. For sound, select the JBL speaker as
-   your operating system's output and enable **Voice & urgent alerts**. It uses
-   the existing audio/haptic adapters, including ElevenLabs or local voice fallback.
+5. End the session before changing settings. For sound, select your computer's
+   normal speakers or headphones and enable **Voice & urgent alerts**. Speech
+   uses ElevenLabs when configured or local text to speech; urgent alerts use
+   a computer audio tone.
 6. Optionally enable **Gemini scene guidance** and/or **Backboard memory** with keys
    configured in the repository's `.env` or environment. Gemini receives camera
    images; Backboard receives object/distance observations. Voice may send guidance
@@ -60,10 +61,9 @@ dashboard to standby. Demo mode never opens hardware, plays sound, or calls clou
    the UI does not independently verify persistence. Core local detection remains
    available when optional cloud services are disabled.
 
-An Arduino, breadboards, and additional wires are **not needed** for this camera-only
-dashboard test. It uses camera-estimated distance, not serial distance input.
-Physical haptic/Arduino wiring continues to be configured in the existing adapters;
-this interface does not add a wiring or serial-port configuration screen.
+The Logitech camera is the only external device. The dashboard estimates
+distance from the live camera image and sends alerts to the computer's
+selected audio output.
 
 ## Activity, logs, and shutdown
 
@@ -99,5 +99,5 @@ ui/
 
 Run `python -m pytest tests/test_ui.py` for configuration, lifecycle, simulated
 camera, cleanup, logging, and HTTP security tests. Run `python -m pytest` for
-the full suite. Physical camera/speaker and cloud-service testing require your
-hardware and credentials and are not covered by the mocked tests.
+  the full suite. Physical camera and cloud-service testing require your camera
+  and credentials and are not covered by the mocked tests.

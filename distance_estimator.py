@@ -1,7 +1,6 @@
 """
 distance_estimator.py — Monocular Distance Estimation from Camera Bounding Boxes
 ================================================================================
-Used when physical ultrasonic sensor is unavailable.
 Estimates object distance in metres using the apparent vertical height of
 the detected bounding box relative to the camera frame height.
 
@@ -23,13 +22,15 @@ from fusion import Detection
 # Approximate typical physical heights of objects in metres
 TYPICAL_HEIGHT_M: dict[str, float] = {
     "person": 1.70,
-    "bicycle": 1.00,
-    "motorcycle": 1.10,
-    "car": 1.50,
+    "animal": 0.55,
     "dog": 0.60,
+    "cat": 0.30,
     "chair": 0.85,
     "dining table": 0.75,
     "couch": 0.85,
+    "tv": 0.60,
+    "potted plant": 0.45,
+    "bottle": 0.25,
 }
 DEFAULT_OBJECT_HEIGHT_M = 1.00
 
@@ -40,7 +41,7 @@ DEFAULT_FRAME_HEIGHT = 480
 class CameraDistanceEstimator:
     """
     Computes an estimated distance in metres from camera detections.
-    Exposes `.read()` so it is a direct drop-in replacement for SerialDistanceReader.
+    Exposes `.read()` for each sensing tick.
     """
 
     def __init__(

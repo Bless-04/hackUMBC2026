@@ -50,7 +50,7 @@ def strict_engine():
 
 @pytest.fixture
 def mock_hw():
-    """Mocked HardwareInterface so tests never touch real TTS/GPIO."""
+    """Mocked HardwareInterface so tests never play speech or tones."""
     return MagicMock(spec=HardwareInterface)
 
 

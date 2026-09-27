@@ -100,8 +100,8 @@ class TestScenario3_ObjectAt50cm(unittest.TestCase):
         self.assertEqual(result2.action, FusionAction.URGENT)
 
 
-class TestScenario4_UltrasonicCloseNoCamera(unittest.TestCase):
-    """Ultrasonic sees close object, camera sees nothing → still URGENT."""
+class TestScenario4_CameraDistanceNearNoDetection(unittest.TestCase):
+    """Camera distance is near with no recognized object: still urgent."""
 
     def test_near_no_vision(self):
         engine = FusionEngine()
@@ -111,7 +111,7 @@ class TestScenario4_UltrasonicCloseNoCamera(unittest.TestCase):
 
 
 class TestScenario5_CameraSeesObjectFar(unittest.TestCase):
-    """Camera sees object but ultrasonic reads far → SILENT."""
+    """Camera sees an object estimated far away: stay silent."""
 
     def test_far_with_detection_is_silent(self):
         engine = FusionEngine()
@@ -463,7 +463,6 @@ class TestGuideSenseHUD(unittest.TestCase):
         self.np = np
         self.hud = GuideSenseHUD(features={
             "Camera": "Real",
-            "Arduino": "Connected",
             "Gemini": "Active",
             "Backboard": "Active",
             "Logging": "Active",

@@ -94,12 +94,12 @@ class TestScenario3_ObjectAt50cm:
 
 
 # ===========================================================================
-# Scenario 4 — Ultrasonic close, camera sees nothing → still URGENT
+# Scenario 4 — Camera distance is near with no recognized object → still URGENT
 # ===========================================================================
 
 @pytest.mark.fusion
 @pytest.mark.scenario
-class TestScenario4_UltrasonicCloseNoCamera:
+class TestScenario4_CameraDistanceNearNoDetection:
 
     def test_near_no_vision_is_urgent(self):
         engine = FusionEngine()
@@ -109,7 +109,7 @@ class TestScenario4_UltrasonicCloseNoCamera:
 
 
 # ===========================================================================
-# Scenario 5 — Camera sees object but ultrasonic reads far → SILENT
+# Scenario 5 — Camera sees an object estimated far away → SILENT
 # ===========================================================================
 
 @pytest.mark.fusion
@@ -469,7 +469,6 @@ class TestGuideSenseHUD:
 
         hud = GuideSenseHUD(features={
             "Camera": "Real",
-            "Arduino": "Connected",
             "Gemini": "Active",
             "Backboard": "Active",
             "Logging": "Active",
