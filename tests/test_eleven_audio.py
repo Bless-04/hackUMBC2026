@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from eleven_audio import ElevenLabsVoice, pcm_to_wav_bytes
+from hardware.eleven_audio import ElevenLabsVoice, pcm_to_wav_bytes
 
 
 def test_eleven_voice_availability():

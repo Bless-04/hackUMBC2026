@@ -7,8 +7,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from fusion import Detection, FusionEngine, SensorFrame
-from state_machine import HardwareInterface, StateMachine
+import core._compat  # noqa: F401 - registers backward compatibility aliases
+from core.fusion import Detection, FusionEngine, SensorFrame
+from core.state_machine import HardwareInterface, StateMachine
 
 # ---------------------------------------------------------------------------
 # Builder helpers (available to every test via import or direct call)

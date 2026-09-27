@@ -7,7 +7,7 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock, patch
 
-from backboard_memory import BackboardMemory
+from services.backboard_memory import BackboardMemory
 
 
 def test_backboard_availability():
@@ -43,7 +43,7 @@ def test_query_memory_async():
 
     callback = MagicMock()
     # Mock Gemini so it returns immediately in tests
-    with patch("gemini_narrator.GeminiNarrator.describe_scene", return_value="You passed a door 2 meters away."):
+    with patch("services.gemini_narrator.GeminiNarrator.describe_scene", return_value="You passed a door 2 meters away."):
         mem.query_memory_async("What is ahead?", on_response=callback)
         time.sleep(0.15)
 

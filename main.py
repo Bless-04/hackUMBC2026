@@ -10,8 +10,8 @@ from __future__ import annotations
 import argparse
 import time
 
-from fusion import Detection, FusionAction, FusionEngine, SensorFrame
-from state_machine import HardwareInterface, StateMachine
+from core.fusion import Detection, FusionAction, FusionEngine, SensorFrame
+from core.state_machine import HardwareInterface, StateMachine
 
 TICK_HZ = 10
 TICK_INTERVAL = 1.0 / TICK_HZ
@@ -103,8 +103,8 @@ class MockHapticOutput:
 def _load_output(enable_audio: bool) -> CompositeHardwareInterface:
     if not enable_audio:
         return CompositeHardwareInterface(MockAudioOutput(), MockHapticOutput())
-    from audio import AudioOutput
-    from haptics import HapticOutput
+    from hardware.audio import AudioOutput
+    from hardware.haptics import HapticOutput
 
     audio = AudioOutput()
     try:
@@ -130,8 +130,8 @@ def run(
     vision_reader = output = logger = hud = None
     try:
         if use_camera:
-            from distance_estimator import CameraDistanceEstimator
-            from vision import VisionReader
+            from vision.distance_estimator import CameraDistanceEstimator
+            from vision.vision import VisionReader
 
             vision_reader = VisionReader(camera_index=camera_index)
             estimator = CameraDistanceEstimator()
@@ -145,23 +145,23 @@ def run(
 
         output = _load_output(enable_audio)
         if enable_logging:
-            from logger import EventLogger
+            from telemetry.logger import EventLogger
 
             logger = EventLogger()
 
         narrator = None
         if enable_gemini and use_camera:
-            from gemini_narrator import GeminiNarrator
+            from services.gemini_narrator import GeminiNarrator
 
             narrator = GeminiNarrator()
         memory = None
         if enable_backboard and use_camera:
-            from backboard_memory import BackboardMemory
+            from services.backboard_memory import BackboardMemory
 
             memory = BackboardMemory()
 
         if enable_gui:
-            from hud import GuideSenseHUD
+            from ui.hud import GuideSenseHUD
 
             hud = GuideSenseHUD(features={
                 "Camera": f"Live {camera_index}" if use_camera else "Demo",

@@ -11,8 +11,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from fusion import Detection, FusionAction, FusionResult, SensorFrame, Zone
-from state_machine import SystemState
+from core.fusion import Detection, FusionAction, FusionResult, SensorFrame, Zone
+from core.state_machine import SystemState
 
 
 def test_vision_converts_filters_clamps_and_ranks(monkeypatch, tmp_path):
@@ -101,11 +101,7 @@ def test_audio_queues_speech_on_one_worker(monkeypatch):
         def runAndWait(self):
             finished.set()
 
-    monkeypatch.setitem(
-        sys.modules,
-        "eleven_audio",
-        SimpleNamespace(ElevenLabsVoice=lambda: FakeEleven()),
-    )
+    monkeypatch.setattr("hardware.eleven_audio.ElevenLabsVoice", FakeEleven)
     monkeypatch.setitem(sys.modules, "pyttsx3", SimpleNamespace(init=FakeEngine))
 
     from audio import AudioOutput

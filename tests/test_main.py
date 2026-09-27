@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import sys
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 import main
-from fusion import Detection
+from core.fusion import Detection
 
 
 def test_live_cli_uses_camera_frame_size_for_distance(monkeypatch):
@@ -26,7 +25,7 @@ def test_live_cli_uses_camera_frame_size_for_distance(monkeypatch):
         cameras.append(camera_index)
         return reader
 
-    monkeypatch.setitem(sys.modules, "vision", SimpleNamespace(VisionReader=open_camera))
+    monkeypatch.setattr("vision.vision.VisionReader", open_camera)
     estimators = []
 
     class Estimator:
@@ -42,8 +41,7 @@ def test_live_cli_uses_camera_frame_size_for_distance(monkeypatch):
         def read(self):
             return 1.5
 
-    monkeypatch.setitem(sys.modules, "distance_estimator",
-                        SimpleNamespace(CameraDistanceEstimator=Estimator))
+    monkeypatch.setattr("vision.distance_estimator.CameraDistanceEstimator", Estimator)
     main.run(use_camera=True, camera_index=1, enable_logging=False,
              duration_sec=.11, verbose=False)
 
@@ -57,6 +55,6 @@ def test_live_cli_does_not_show_simulated_data_when_camera_fails(monkeypatch):
     def unavailable(*, camera_index):
         raise RuntimeError(f"Camera {camera_index} is unavailable")
 
-    monkeypatch.setitem(sys.modules, "vision", SimpleNamespace(VisionReader=unavailable))
+    monkeypatch.setattr("vision.vision.VisionReader", unavailable)
     with pytest.raises(RuntimeError, match="Camera 1 is unavailable"):
         main.run(use_camera=True, camera_index=1, enable_logging=False, verbose=False)

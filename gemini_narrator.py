@@ -40,14 +40,18 @@ MIN_CALL_INTERVAL_SEC = 5.0
 SYSTEM_PROMPT = (
     "You are GuideSense, an assistive AI for a blind or low-vision user wearing a chest camera. "
     "The user was alerted to an object in front of them. "
-    "Provide a direct, practical, 1 sentence description focusing on navigation: "
+    "Provide a direct, practical,  8 word max  description focusing on navigation: "
+    "Be extremely concise. Use short, direct sentences."
     "where the object is located relative to the user (e.g. directly ahead, on the left/right), "
     "what it is doing or its state, and whether the walking path is clear. "
     "Do not use markdown, bullet points, or emojis. Speak conversationally as voice output."
+    "Eliminate filler words and verbose preambles"
+    "Maintain a polite, confident, and anticipatory tone."
 )
 
 
 def load_api_key() -> Optional[str]:
+
     """Load GEMINI_API_KEY from environment variable or .env file."""
     if "GEMINI_API_KEY" in os.environ:
         return os.environ["GEMINI_API_KEY"].strip()

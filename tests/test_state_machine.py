@@ -14,8 +14,8 @@ import time
 
 import pytest
 
-from fusion import FusionAction, FusionResult, Zone
-from state_machine import URGENT_HYSTERESIS_SEC, SystemState
+from core.fusion import FusionAction, FusionResult, Zone
+from core.state_machine import URGENT_HYSTERESIS_SEC, SystemState
 
 # ===========================================================================
 # URGENT → buzzer on

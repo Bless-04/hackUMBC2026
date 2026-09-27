@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from distance_estimator import CameraDistanceEstimator
-from fusion import Detection
+from core.fusion import Detection
+from vision.distance_estimator import CameraDistanceEstimator
 
 
 @pytest.fixture

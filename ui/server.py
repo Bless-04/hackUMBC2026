@@ -81,6 +81,7 @@ def make_handler(controller, token):
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 <= length <= 4096:
+                    self.rfile.read(min(length, 65536))
                     return self.json(413, {"error": "Request too large."})
                 body = json.loads(self.rfile.read(length) or b"{}")
                 if self.path == "/api/start":
