@@ -193,6 +193,16 @@ class SessionController:
             hardware = DashboardHardware(self, generation, audio, haptic)
             machine = StateMachine(hardware)
             engine = FusionEngine()
+            from hud import GuideSenseHUD
+            hud = GuideSenseHUD(
+                features={
+                    "Camera": services.get("camera", "Active"),
+                    "Arduino": "Mock",
+                    "Gemini": services.get("gemini", "Off"),
+                    "Backboard": services.get("backboard", "Off"),
+                    "Logging": services.get("logging", "Off"),
+                }
+            )
             start = last_frame_time = time.monotonic()
             previous_state = None
             previous_image = None
@@ -225,9 +235,11 @@ class SessionController:
                     self.event("State", f"{state.name.title()} · {result.reason}")
                     previous_state = state.name
                 jpeg = None
-                if image is not None and fresh and tick - last_frame_time >= .15:
+                if fresh and tick - last_frame_time >= .15:
                     import cv2
-                    ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                    hud_base = image if image is not None else hud._create_synthetic_canvas(width, height)
+                    hud_frame = hud.draw_hud(hud_base, frame, result, state)
+                    ok, encoded = cv2.imencode(".jpg", hud_frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
                     if ok:
                         jpeg = encoded.tobytes()
                     last_frame_time = tick
