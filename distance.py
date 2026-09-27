@@ -49,18 +49,6 @@ OBJECT_HEIGHTS_CM: dict[str, float] = {
     "boat": 150.0,
     "airplane": 300.0,
 
-    # Animals
-    "dog": 60.0,
-    "cat": 25.0,
-    "bird": 20.0,
-    "horse": 160.0,
-    "sheep": 80.0,
-    "cow": 140.0,
-    "elephant": 300.0,
-    "bear": 150.0,
-    "zebra": 140.0,
-    "giraffe": 450.0,
-
     # Indoor Furniture & Household
     "chair": 85.0,
     "couch": 85.0,
@@ -69,7 +57,7 @@ OBJECT_HEIGHTS_CM: dict[str, float] = {
     "dining table": 75.0,
     "table": 75.0,
     "toilet": 75.0,
-    "tv": 60.0,
+    "screen": 60.0,
     "laptop": 25.0,
     "sink": 80.0,
     "refrigerator": 175.0,
