@@ -12,7 +12,7 @@ from hardware.audio_playback import play_wav_bytes
 
 TONE_HZ = 880
 TONE_DURATION_SEC = 0.20
-TONE_GAP_SEC = 0.08
+TONE_GAP_SEC = 0.58
 
 
 def _tone_wav(frequency: int, duration: float, sample_rate: int = 22050) -> bytes:
