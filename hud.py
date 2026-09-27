@@ -620,7 +620,7 @@ class GuideSenseHUD:
         elif state == SystemState.INFORMATIVE:
             state_bg = HUDTheme.STATE_INFORMATIVE
             state_text_col = HUDTheme.TEXT_DARK
-            lbl_suffix = f" [{result.label.upper()}]" if result.label else ""
+            lbl_suffix = f" [{str(result.label).upper()}]" if result.label else ""
             state_label = f"INFORMATIVE{lbl_suffix}"
         else:
             state_bg = HUDTheme.STATE_SILENT

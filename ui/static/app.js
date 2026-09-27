@@ -138,14 +138,14 @@ function render(data) {
   $("notice").textContent = data.error || "";
   const stage = $("camera-stage");
   stage.classList.toggle("idle", !running);
-  stage.classList.toggle("is-live", !demo);
+  stage.classList.toggle("is-live", !demo || (running && data.has_frame));
   stage.style.aspectRatio = running ? `${data.frame_width} / ${data.frame_height}` : "";
-  $("demo-scene").hidden = !demo;
-  $("camera-image").hidden = demo || !running || !data.has_frame;
-  $("feed-source").textContent = demo ? "DEMO ENVIRONMENT" : `LIVE CAMERA · ${settings.camera}`;
+  $("demo-scene").hidden = running && data.has_frame ? true : !demo;
+  $("camera-image").hidden = !running || !data.has_frame;
+  $("feed-source").textContent = demo ? "DEMO HUD STREAM" : `LIVE CAMERA · ${settings.camera}`;
   $("feed-badge").className = `pill ${running ? demo ? "demo" : "live" : "neutral"}`;
-  $("feed-badge").innerHTML = `<i></i>${running ? demo ? "SIMULATED" : data.has_frame ? "LIVE" : "NO FRAME" : "STANDBY"}`;
-  $("frame-info").textContent = running ? demo ? "Simulated scene · hardware and cloud off" : data.has_frame ? `${data.frame_width} × ${data.frame_height} · camera feed` : "Waiting for a fresh camera frame" : demo ? "Illustrated preview · no camera access" : "Camera is inactive";
+  $("feed-badge").innerHTML = `<i></i>${running ? demo ? "HUD DEMO" : data.has_frame ? "LIVE" : "NO FRAME" : "STANDBY"}`;
+  $("frame-info").textContent = running ? data.has_frame ? `${data.frame_width} × ${data.frame_height} · GuideSense OpenCV HUD` : "Waiting for a fresh camera frame" : demo ? "Illustrated preview · no camera access" : "Camera is inactive";
   $("stage-empty").hidden = running && (demo || data.has_frame);
   $("focus-corners").hidden = running;
   $("stage-empty").querySelector("h3").textContent = data.status === "starting" ? "Bringing the world into view…" : running ? "Waiting for your camera." : data.status === "stopping" ? "See you in a moment." : "Ready when you are.";
@@ -188,12 +188,16 @@ function render(data) {
 }
 function drawDetections(detections, data, demo) {
   const overlay = $("detection-overlay");
+  if (data.has_frame) {
+    setHtml(overlay, "");
+    return;
+  }
   overlay.setAttribute("viewBox", `0 0 ${data.frame_width} ${data.frame_height}`);
   const parts = detections.map((d) => {
     const [x1, y1, x2, y2] = d.bbox;
     const width = x2 - x1, height = y2 - y1;
     const cx = (x1 + x2) / 2;
-    const person = demo ? `<g class="demo-person"><circle cx="${cx}" cy="${y1 + height * .1}" r="${height * .08}"/><path d="M${cx - width * .19},${y1 + height * .22} Q${cx},${y1 + height * .18} ${cx + width * .19},${y1 + height * .22} L${cx + width * .33},${y1 + height * .62} L${cx + width * .18},${y1 + height * .66} L${cx + width * .13},${y2} L${cx},${y2} L${cx - width * .04},${y1 + height * .7} L${cx - width * .13},${y2} L${cx - width * .27},${y2} L${cx - width * .18},${y1 + height * .6} L${cx - width * .33},${y1 + height * .6}Z"/></g>` : "";
+    const person = demo ? `<g class="demo-person"><circle cx="${cx}" cy="${y1 + height * .1}" r="${height * .08}"/><path d="M${cx - width * .19},${y1 + height * .18} Q${cx},${y1 + height * .18} ${cx + width * .19},${y1 + height * .22} L${cx + width * .33},${y1 + height * .62} L${cx + width * .18},${y1 + height * .66} L${cx + width * .13},${y2} L${cx},${y2} L${cx - width * .04},${y1 + height * .7} L${cx - width * .13},${y2} L${cx - width * .27},${y2} L${cx - width * .18},${y1 + height * .6} L${cx - width * .33},${y1 + height * .6}Z"/></g>` : "";
     return `${person}<rect class="detection-box" x="${x1}" y="${y1}" width="${width}" height="${height}"/><rect class="detection-label-bg" x="${x1}" y="${Math.max(0, y1 - 20)}" width="${Math.max(125, d.label.length * 7 + 65)}" height="20" rx="3"/><text class="detection-label" x="${x1 + 7}" y="${Math.max(14, y1 - 6)}">${escapeHtml(d.label)} · ${Math.round(d.confidence * 100)}% · ${escapeHtml(d.direction.toLowerCase())}</text>`;
   });
   setHtml(overlay, parts.join(""));
@@ -222,7 +226,7 @@ async function poll() {
 }
 async function pollFrame() {
   try {
-    if (connected && snapshot?.status === "running" && snapshot.mode === "camera" && snapshot.has_frame) {
+    if (connected && snapshot?.status === "running" && snapshot.has_frame) {
       const response = await fetch("/api/frame", { signal: AbortSignal.timeout(3000) });
       if (response.ok && response.status !== 204) {
         const url = URL.createObjectURL(await response.blob());

@@ -244,8 +244,10 @@ def run(
         duration_sec        : Seconds to run (0 = forever).
         verbose             : Print per-tick trace to stdout.
     """
+    # If HUD is active, disable VisionReader's internal preview to avoid duplicate windows
+    actual_preview = show_preview and not enable_gui
     vision_reader = _load_vision_reader(
-        use_real_vision, camera_index=camera_index, show_preview=show_preview
+        use_real_vision, camera_index=camera_index, show_preview=actual_preview
     )
 
     if use_camera_distance:
@@ -419,17 +421,19 @@ if __name__ == "__main__":
     parser.add_argument("--duration",        type=float, default=10.0, help="Run duration in seconds (default 10)")
     args = parser.parse_args()
 
+    use_gui = args.gui or args.preview
+
     run(
         use_real_distance   = args.real or args.real_distance,
         use_camera_distance = args.camera_distance,
-        use_real_vision     = args.real or args.real_vision or args.camera_distance or args.gui,
+        use_real_vision     = args.real or args.real_vision or args.camera_distance or use_gui,
         use_real_hardware   = args.real,
         camera_index        = args.camera,
-        show_preview        = args.preview,
+        show_preview        = False,  # HUD handles the display cleanly
         enable_gemini       = args.gemini,
         enable_backboard    = args.backboard,
         enable_logging      = not args.no_log,
-        enable_gui          = args.gui,
+        enable_gui          = use_gui,
         duration_sec        = 0.0 if args.forever else args.duration,
         verbose             = True,
     )
