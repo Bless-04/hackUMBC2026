@@ -40,10 +40,8 @@ MIN_CALL_INTERVAL_SEC = 5.0
 SYSTEM_PROMPT = (
     "You are GuideSense, an assistive AI for a blind or low-vision user wearing a chest camera. "
     "The user was alerted to an object in front of them. "
-    "Provide a direct, practical, 1 sentence description focusing on navigation: "
-    "where the object is located relative to the user (e.g. directly ahead, on the left/right), "
-    "what it is doing or its state, and whether the walking path is clear. "
-    "Do not use markdown, bullet points, or emojis. Speak conversationally as voice output."
+    "Provide a direct, practical, 8 word max description. "
+    "DO NOT give the user any instructions (e.g. you should ..., please... be careful... ) - you are strictly informative."
 )
 
 
@@ -92,23 +90,27 @@ class GeminiNarrator:
         image_bytes: Optional[bytes] = None,
         label: Optional[str] = None,
         distance_m: Optional[float] = None,
+        custom_prompt: Optional[str] = None,
     ) -> Optional[str]:
         """
         Synchronous call to Gemini.
-        Returns a concise 1-2 sentence description, or None if unavailable.
+        Returns a concise description (8 words max), or None if unavailable.
         """
         if not self.api_key:
             return None
 
         # Build prompt parts
         parts = []
-        context_hint = ""
-        if label and distance_m:
-            context_hint = f" The system detected a '{label}' at approximately {distance_m:.1f} metres."
-        elif label:
-            context_hint = f" The system detected a '{label}' ahead."
+        if custom_prompt:
+            prompt_text = custom_prompt
+        else:
+            context_hint = ""
+            if label and distance_m:
+                context_hint = f" The system detected a '{label}' at approximately {distance_m:.1f} metres."
+            elif label:
+                context_hint = f" The system detected a '{label}' ahead."
 
-        prompt_text = f"{SYSTEM_PROMPT}{context_hint}"
+            prompt_text = f"{SYSTEM_PROMPT}{context_hint}"
 
         if image_bytes:
             # Multimodal request with image
@@ -122,13 +124,13 @@ class GeminiNarrator:
             parts.append({"text": prompt_text})
         else:
             # Text-only contextual prompt
-            parts.append({"text": prompt_text + " Give a brief safety guidance statement for this detection."})
+            parts.append({"text": prompt_text})
 
         payload = json.dumps({
             "contents": [{"parts": parts}],
             "generationConfig": {
-                "maxOutputTokens": 300,
-                "temperature": 0.3,
+                "maxOutputTokens": 40,
+                "temperature": 0.2,
             }
         }).encode("utf-8")
 
@@ -168,6 +170,7 @@ class GeminiNarrator:
         image_bytes: Optional[bytes] = None,
         label: Optional[str] = None,
         distance_m: Optional[float] = None,
+        custom_prompt: Optional[str] = None,
         on_complete: Optional[Callable[[str], None]] = None,
     ) -> bool:
         """
@@ -189,6 +192,7 @@ class GeminiNarrator:
                     image_bytes=image_bytes,
                     label=label,
                     distance_m=distance_m,
+                    custom_prompt=custom_prompt,
                 )
                 if description and on_complete:
                     on_complete(description)
