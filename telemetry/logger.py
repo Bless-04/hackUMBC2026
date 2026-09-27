@@ -109,7 +109,7 @@ class EventLogger:
 
 
 if __name__ == "__main__":
-    from fusion import Detection, FusionAction, Zone
+    from core.fusion import Detection, FusionAction, Zone
 
     demo_path = "guidesense_demo.csv"
     with EventLogger(demo_path) as event_logger:

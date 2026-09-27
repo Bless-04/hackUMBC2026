@@ -101,11 +101,7 @@ def test_audio_queues_speech_on_one_worker(monkeypatch):
         def runAndWait(self):
             finished.set()
 
-    monkeypatch.setitem(
-        sys.modules,
-        "eleven_audio",
-        SimpleNamespace(ElevenLabsVoice=lambda: FakeEleven()),
-    )
+    monkeypatch.setattr("hardware.eleven_audio.ElevenLabsVoice", FakeEleven)
     monkeypatch.setitem(sys.modules, "pyttsx3", SimpleNamespace(init=FakeEngine))
 
     from audio import AudioOutput

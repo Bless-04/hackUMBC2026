@@ -164,44 +164,43 @@ class SessionController:
         try:
             services = dict(self.data["services"])
             if config["mode"] == "camera":
-                import distance_estimator
+                from vision.distance_estimator import CameraDistanceEstimator
+                from vision.vision import VisionReader
 
-                import vision
-
-                reader = vision.VisionReader(camera_index=config["camera"])
-                estimator = distance_estimator.CameraDistanceEstimator()
+                reader = VisionReader(camera_index=config["camera"])
+                estimator = CameraDistanceEstimator()
                 services["camera"] = f"Camera {config['camera']}"
             else:
                 services["camera"] = "Simulated"
             if config["voice"]:
-                import audio as audio_mod
-                import haptics as haptics_mod
+                from hardware.audio import AudioOutput
+                from hardware.haptics import HapticOutput
 
-                audio = audio_mod.AudioOutput()
-                haptic = haptics_mod.HapticOutput()
+                audio = AudioOutput()
+                haptic = HapticOutput()
                 services["voice"] = "Enabled"
             if config["gemini"]:
-                import gemini_narrator
+                from services.gemini_narrator import GeminiNarrator
 
-                narrator = gemini_narrator.GeminiNarrator()
+                narrator = GeminiNarrator()
                 services["gemini"] = "Configured" if narrator.is_available else "Key missing"
             if config["backboard"]:
-                import backboard_memory
+                from services.backboard_memory import BackboardMemory
 
-                memory = backboard_memory.BackboardMemory()
+                memory = BackboardMemory()
                 services["backboard"] = "Configured" if memory.is_cloud_enabled else "Local memory"
             if config["logging"]:
-                import logger as logger_mod
+                from telemetry.logger import EventLogger
 
                 path = SESSION_DIR / f"session-{time.time_ns()}.csv"
-                logger = logger_mod.EventLogger(path)
+                logger = EventLogger(path)
                 services["logging"] = "Recording"
             hardware = DashboardHardware(self, generation, audio, haptic)
             machine = StateMachine(hardware)
             engine = FusionEngine()
-            import hud as hud_mod
+            from ui.hud import GuideSenseHUD
 
-            hud_obj = hud_mod.GuideSenseHUD(
+            hud_obj = GuideSenseHUD(
                 features={
                     "Camera": services.get("camera", "Active"),
                     "Gemini": services.get("gemini", "Off"),

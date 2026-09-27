@@ -95,7 +95,7 @@ class AudioOutput:
         self._closed = False
 
         try:
-            import eleven_audio
+            from hardware import eleven_audio
 
             voice_cls = getattr(eleven_audio, "ElevenLabsVoice", None)
             if callable(voice_cls):

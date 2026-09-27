@@ -3,12 +3,10 @@
 import csv
 import io
 import json
-import sys
 import threading
 import time
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -62,12 +60,12 @@ def controller():
 
 def test_demo_lifecycle_and_no_external_resources(controller, monkeypatch):
     forbidden = Mock(side_effect=AssertionError("Demo must remain local and silent"))
-    for module, constructor in [("vision", "VisionReader"), ("audio", "AudioOutput"),
-                                ("haptics", "HapticOutput"),
-                                ("gemini_narrator", "GeminiNarrator"),
-                                ("backboard_memory", "BackboardMemory")]:
+    for module, constructor in [("vision.vision", "VisionReader"), ("hardware.audio", "AudioOutput"),
+                                ("hardware.haptics", "HapticOutput"),
+                                ("services.gemini_narrator", "GeminiNarrator"),
+                                ("services.backboard_memory", "BackboardMemory")]:
         # state_machine already imports format_voice_message; these constructors stay unused.
-        monkeypatch.setitem(sys.modules, module, SimpleNamespace(**{constructor: forbidden}))
+        monkeypatch.setattr(f"{module}.{constructor}", forbidden)
     controller.start({"mode": "demo", "voice": True, "gemini": True, "backboard": True})
     wait_until(lambda: controller.snapshot()["ticks"] > 0)
     assert controller.snapshot()["status"] == "running"
@@ -99,7 +97,7 @@ def test_demo_logging_uses_existing_csv_logger(controller, monkeypatch, tmp_path
 def test_camera_failure_is_visible_and_releases_reader(controller, monkeypatch):
     reader = Mock()
     reader.read.side_effect = RuntimeError("synthetic camera failure")
-    monkeypatch.setitem(sys.modules, "vision", SimpleNamespace(VisionReader=Mock(return_value=reader)))
+    monkeypatch.setattr("vision.vision.VisionReader", Mock(return_value=reader))
     controller.start({"mode": "camera"})
     wait_until(lambda: controller.snapshot()["status"] == "error")
     assert controller.snapshot()["error"]
@@ -110,10 +108,10 @@ def test_camera_failure_is_visible_and_releases_reader(controller, monkeypatch):
 
 def test_partial_audio_setup_is_cleaned_up(controller, monkeypatch):
     reader, audio = Mock(), Mock()
-    monkeypatch.setitem(sys.modules, "vision", SimpleNamespace(VisionReader=Mock(return_value=reader)))
-    monkeypatch.setitem(sys.modules, "audio", SimpleNamespace(AudioOutput=Mock(return_value=audio)))
-    monkeypatch.setitem(sys.modules, "haptics", SimpleNamespace(
-        HapticOutput=Mock(side_effect=RuntimeError("no alert output"))))
+    monkeypatch.setattr("vision.vision.VisionReader", Mock(return_value=reader))
+    monkeypatch.setattr("hardware.audio.AudioOutput", Mock(return_value=audio))
+    monkeypatch.setattr("hardware.haptics.HapticOutput",
+                        Mock(side_effect=RuntimeError("no alert output")))
     controller.start({"mode": "camera", "voice": True})
     wait_until(lambda: controller.snapshot()["status"] == "error")
     audio.close.assert_called_once()
@@ -126,7 +124,7 @@ def test_stale_camera_frame_is_not_shown_as_live(controller, monkeypatch):
     image = np.zeros((240, 320, 3), dtype=np.uint8)
     reader = Mock(latest_frame=image)
     reader.read.return_value = []  # Repeated old frame simulates capture failure.
-    monkeypatch.setitem(sys.modules, "vision", SimpleNamespace(VisionReader=Mock(return_value=reader)))
+    monkeypatch.setattr("vision.vision.VisionReader", Mock(return_value=reader))
     controller.start({"mode": "camera"})
     wait_until(lambda: controller.snapshot()["ticks"] > 2)
     state = controller.snapshot()
@@ -146,7 +144,7 @@ def test_fresh_camera_frames_are_encoded(controller, monkeypatch):
         return []
 
     reader.read.side_effect = read
-    monkeypatch.setitem(sys.modules, "vision", SimpleNamespace(VisionReader=Mock(return_value=reader)))
+    monkeypatch.setattr("vision.vision.VisionReader", Mock(return_value=reader))
     controller.start({"mode": "camera"})
     wait_until(lambda: controller.snapshot()["has_frame"])
     assert controller.jpeg.startswith(b"\xff\xd8")

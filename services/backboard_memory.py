@@ -234,7 +234,7 @@ class BackboardMemory:
 
             # Try generating a conversational reply via Gemini if available
             try:
-                from gemini_narrator import GeminiNarrator
+                from services.gemini_narrator import GeminiNarrator
                 narrator = GeminiNarrator()
                 if narrator.is_available:
                     prompt = (

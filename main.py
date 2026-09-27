@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import time
 
-import core._compat  # noqa: F401 - registers backward compatibility aliases
 from core.fusion import Detection, FusionAction, FusionEngine, SensorFrame
 from core.state_machine import HardwareInterface, StateMachine
 
@@ -131,12 +130,11 @@ def run(
     vision_reader = output = logger = hud = None
     try:
         if use_camera:
-            import distance_estimator
+            from vision.distance_estimator import CameraDistanceEstimator
+            from vision.vision import VisionReader
 
-            import vision
-
-            vision_reader = vision.VisionReader(camera_index=camera_index)
-            estimator = distance_estimator.CameraDistanceEstimator()
+            vision_reader = VisionReader(camera_index=camera_index)
+            estimator = CameraDistanceEstimator()
             distance_reader = None
             print(f"[main] Using live camera {camera_index} and camera distance estimation")
         else:
