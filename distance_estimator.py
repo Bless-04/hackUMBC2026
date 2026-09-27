@@ -23,13 +23,15 @@ from fusion import Detection
 # Approximate typical physical heights of objects in metres
 TYPICAL_HEIGHT_M: dict[str, float] = {
     "person": 1.70,
-    "bicycle": 1.00,
-    "motorcycle": 1.10,
-    "car": 1.50,
+    "animal": 0.55,
     "dog": 0.60,
+    "cat": 0.30,
     "chair": 0.85,
     "dining table": 0.75,
     "couch": 0.85,
+    "tv": 0.60,
+    "potted plant": 0.45,
+    "bottle": 0.25,
 }
 DEFAULT_OBJECT_HEIGHT_M = 1.00
 

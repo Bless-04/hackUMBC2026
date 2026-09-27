@@ -134,15 +134,17 @@ class FusionResult:
 
 OBJECT_PRIORITY: dict[str, int] = {
     "person":       10,
-    "bicycle":       8,
-    "motorcycle":    8,
-    "car":           7,
-    "dog":           6,
+    "animal":        7,   # indoor pets/animals
+    "dog":           6,   # alias retained
+    "cat":           6,   # alias retained
     "chair":         5,
     "dining table":  4,
     "couch":         4,
     "bed":           3,
     "toilet":        3,
+    "bottle":        2,
+    "potted plant":  2,
+    "tv":            2,
     # anything else defaults to 1  (see _priority())
 }
 

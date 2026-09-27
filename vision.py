@@ -54,6 +54,24 @@ MODEL_CLASSES = [
 # scaffold constant.
 COCO_CLASSES = MODEL_CLASSES
 
+# Indoor navigation label mapping:
+# - Broaden specific animals (dog, cat, bird, horse, sheep, cow) -> "animal"
+# - Filter out outdoor vehicles (airplane, boat, motorcycle, bus, train) -> None (ignored)
+# - Keep indoor relevant objects (person, chair, dining table, couch, tv, bottle, potted plant, etc.)
+INDOOR_LABEL_MAP: dict[str, str | None] = {
+    "airplane": None,       # Filtered out (not applicable indoors)
+    "boat": None,           # Filtered out (not applicable indoors)
+    "motorcycle": None,     # Filtered out (not applicable indoors)
+    "bus": None,            # Filtered out (not applicable indoors)
+    "train": None,          # Filtered out (not applicable indoors)
+    "dog": "animal",        # Broadened to animal
+    "cat": "animal",        # Broadened to animal
+    "bird": "animal",       # Broadened to animal
+    "horse": "animal",      # Broadened to animal
+    "sheep": "animal",      # Broadened to animal
+    "cow": "animal",        # Broadened to animal
+}
+
 
 def _model_path(value: str | Path) -> Path:
     """Resolve default model files next to this module, independent of cwd."""
@@ -204,9 +222,15 @@ class VisionReader:
             if x2 <= x1 or y2 <= y1:
                 continue
 
+            raw_label = MODEL_CLASSES[class_index]
+            # Map label for indoor assistive demo; skip if filtered out
+            final_label = INDOOR_LABEL_MAP.get(raw_label, raw_label)
+            if final_label is None:
+                continue
+
             results.append(
                 Detection(
-                    label=MODEL_CLASSES[class_index],
+                    label=final_label,
                     confidence=confidence,
                     bbox=(x1, y1, x2, y2),
                     timestamp=captured_at,
