@@ -306,7 +306,6 @@ class GuideSenseHUD:
         self.window_name = window_name
         self.features: dict[str, str] = features or {
             "Camera": "Active",
-            "Arduino": "Mock",
             "Gemini": "Off",
             "Backboard": "Off",
             "Logging": "Active",

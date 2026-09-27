@@ -235,7 +235,17 @@ class SessionController:
                     self.event("State", f"{state.name.title()} · {result.reason}")
                     previous_state = state.name
                 jpeg = None
-                if fresh and tick - last_frame_time >= .15:
+                # In demo mode, fresh is always True, so we always produce a frame.
+                # In camera mode, we only render when we have a new camera frame (fresh=True).
+                # We also render on a timer even when fresh=False in demo mode so the HUD
+                # animates smoothly (pulse, state changes) at ~7 FPS.
+                should_render = (
+                    fresh and image is not None  # camera: new raw frame arrived
+                ) or (
+                    reader is None  # demo: always re-render from synthetic canvas
+                    and tick - last_frame_time >= .15
+                )
+                if should_render:
                     import cv2
                     hud_base = image if image is not None else hud._create_synthetic_canvas(width, height)
                     hud_frame = hud.draw_hud(hud_base, frame, result, state)
@@ -255,7 +265,9 @@ class SessionController:
                 with self.lock:
                     if jpeg is not None:
                         self.jpeg = jpeg
-                    if not fresh:
+                    elif reader is not None and not fresh:
+                        # Camera mode: frame was stale/repeated — clear the stale jpeg
+                        # so the UI shows a waiting indicator instead of a frozen old frame.
                         self.jpeg = None
                     self.data.update(
                         elapsed=elapsed, state=state.name, zone=result.zone.name if fresh else None,
